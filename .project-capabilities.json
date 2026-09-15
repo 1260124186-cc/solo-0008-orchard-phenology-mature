@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "target_0_1": 7,
+  "target_feature": 20,
+  "capabilities": [
+    {
+      "id": "access-policy",
+      "name": "访问策略与资源范围",
+      "core_status": "absent",
+      "mature_status": "present",
+      "core_forbidden_paths": [
+        "backend/app/security"
+      ],
+      "mature_required_paths": [
+        "backend/app/security/service.py"
+      ],
+      "entry_points": [],
+      "observable_outcome": "访问策略与资源范围在真实入口中产生可验证结果",
+      "prompt_object": "访问策略与资源范围",
+      "prompt_mechanism": "访问策略与资源范围的完整生命周期",
+      "overlap_exclusions": [],
+      "order": 1
+    },
+    {
+      "id": "object-versioning",
+      "name": "对象版本与冲突检测",
+      "core_status": "absent",
+      "mature_status": "present",
+      "core_forbidden_paths": [
+        "backend/app/persistence/migrations.py"
+      ],
+      "mature_required_paths": [
+        "backend/app/persistence/repository.py"
+      ],
+      "entry_points": [],
+      "observable_outcome": "对象版本与冲突检测在真实入口中产生可验证结果",
+      "prompt_object": "对象版本与冲突检测",
+      "prompt_mechanism": "对象版本与冲突检测的完整生命周期",
+      "overlap_exclusions": [],
+      "order": 2
+    },
+    {
+      "id": "audit-log",
+      "name": "审计日志",
+      "core_status": "absent",
+      "mature_status": "present",
+      "core_forbidden_paths": [
+        "backend/app/persistence/migrations.py"
+      ],
+      "mature_required_paths": [
+        "backend/app/persistence/repository.py"
+      ],
+      "entry_points": [],
+      "observable_outcome": "审计日志在真实入口中产生可验证结果",
+      "prompt_object": "审计日志",
+      "prompt_mechanism": "审计日志的完整生命周期",
+      "overlap_exclusions": [],
+      "order": 3
+    },
+    {
+      "id": "idempotency",
+      "name": "幂等写入",
+      "core_status": "absent",
+      "mature_status": "present",
+      "core_forbidden_paths": [
+        "backend/app/persistence/migrations.py"
+      ],
+      "mature_required_paths": [
+        "backend/app/persistence/repository.py"
+      ],
+      "entry_points": [],
+      "observable_outcome": "幂等写入在真实入口中产生可验证结果",
+      "prompt_object": "幂等写入",
+      "prompt_mechanism": "幂等写入的完整生命周期",
+      "overlap_exclusions": [],
+      "order": 4
+    },
+    {
+      "id": "job-queue",
+      "name": "后台任务与租约",
+      "core_status": "absent",
+      "mature_status": "present",
+      "core_forbidden_paths": [
+        "backend/app/jobs"
+      ],
+      "mature_required_paths": [
+        "backend/app/jobs/service.py"
+      ],
+      "entry_points": [],
+      "observable_outcome": "后台任务与租约在真实入口中产生可验证结果",
+      "prompt_object": "后台任务与租约",
+      "prompt_mechanism": "后台任务与租约的完整生命周期",
+      "overlap_exclusions": [],
+      "order": 5
+    },
+    {
+      "id": "outbox-delivery",
+      "name": "outbox 事件与投递确认",
+      "core_status": "absent",
+      "mature_status": "present",
+      "core_forbidden_paths": [
+        "backend/app/persistence/migrations.py"
+      ],
+      "mature_required_paths": [
+        "backend/app/persistence/repository.py"
+      ],
+      "entry_points": [],
+      "observable_outcome": "待发布事件可查询并可确认发布状态",
+      "prompt_object": "outbox 投递与检查点",
+      "prompt_mechanism": "outbox 状态、事务关联与发布确认",
+      "overlap_exclusions": [],
+      "order": 6
+    },
+    {
+      "id": "schema-migrations",
+      "name": "数据库模式迁移",
+      "core_status": "absent",
+      "mature_status": "present",
+      "core_forbidden_paths": [
+        "backend/app/persistence/migrations.py"
+      ],
+      "mature_required_paths": [
+        "backend/app/persistence/migrations.py"
+      ],
+      "entry_points": [],
+      "observable_outcome": "数据库模式迁移在真实入口中产生可验证结果",
+      "prompt_object": "数据库模式迁移",
+      "prompt_mechanism": "数据库模式迁移的完整生命周期",
+      "overlap_exclusions": [],
+      "order": 7
+    }
+  ],
+  "feature_slots": [
+    {
+      "id": "season-correction",
+      "existing_entry": "PUT /api/observations/{id}/complete",
+      "existing_state": "完成季节志只读",
+      "iteration_goal": "支持带原因的历史更正",
+      "observable_outcome": "更正不改变原版本或既有分析",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "tree-lifecycle",
+      "existing_entry": "PUT /api/trees/{id}/close",
+      "existing_state": "植株一次性关闭",
+      "iteration_goal": "支持原因、恢复和生命周期",
+      "observable_outcome": "状态由事件时间线可追溯",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "plot-amendment",
+      "existing_entry": "PATCH /api/plots/{id}",
+      "existing_state": "确认园区只读",
+      "iteration_goal": "支持版本化档案修订",
+      "observable_outcome": "历史引用继续指向原版本",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "plot-code-cascade",
+      "existing_entry": "PATCH /api/plots/{id}",
+      "existing_state": "植株编号包含园区前缀",
+      "iteration_goal": "园区编号变更时原子级联",
+      "observable_outcome": "身份不变且历史编号可解释",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "stage-date-precision",
+      "existing_entry": "PUT /api/observations/{id}/stages",
+      "existing_state": "阶段日期为单日",
+      "iteration_goal": "支持区间和边界精度",
+      "observable_outcome": "比较不伪造精确中点",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "stage-observation-state",
+      "existing_entry": "PUT /api/observations/{id}/complete",
+      "existing_state": "缺失阶段统一处理",
+      "iteration_goal": "区分未观察、不适用和待核实",
+      "observable_outcome": "完成结论显示状态依据",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "rule-profile-evolution",
+      "existing_entry": "PUT /api/observations",
+      "existing_state": "阶段规则固定",
+      "iteration_goal": "支持版本化规则迁移",
+      "observable_outcome": "历史结果继续使用原规则",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "multi-year-cohort",
+      "existing_entry": "GET /api/comparisons",
+      "existing_state": "比较限同一年",
+      "iteration_goal": "支持多年队列和缺失机制",
+      "observable_outcome": "纳入和排除都有可解释依据",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "comparison-normalization",
+      "existing_entry": "PUT /api/comparisons",
+      "existing_state": "比较固定原始日期",
+      "iteration_goal": "支持基准交换和归一化",
+      "observable_outcome": "口径变化确定性重算",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "comparison-source-drift",
+      "existing_entry": "GET /api/comparisons/{id}",
+      "existing_state": "比较保存后无漂移说明",
+      "iteration_goal": "检查来源版本和影响阶段",
+      "observable_outcome": "旧比较冻结且新派生可追踪",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "brief-versioning",
+      "existing_entry": "PUT /api/plots/{id}/briefs",
+      "existing_state": "简报只有单次输出",
+      "iteration_goal": "支持版本列表和来源差异",
+      "observable_outcome": "历史简报不从最新档案补值",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "observer-identity",
+      "existing_entry": "PUT /api/observations",
+      "existing_state": "观察者为自由文本",
+      "iteration_goal": "建立身份连续性和署名快照",
+      "observable_outcome": "改名合并后归因仍可追溯",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "tree-lineage",
+      "existing_entry": "PUT /api/trees",
+      "existing_state": "植株来源为自由文本",
+      "iteration_goal": "支持多代谱系和来源可信度",
+      "observable_outcome": "无环且历史身份可追溯",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "cultivar-identity",
+      "existing_entry": "PUT /api/trees",
+      "existing_state": "品种为自由文本",
+      "iteration_goal": "建立品种名录和别名归并",
+      "observable_outcome": "归并拆分不破坏历史结论",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "duplicate-entity-merge",
+      "existing_entry": "PUT /api/plots/{id}",
+      "existing_state": "重复档案无合并流程",
+      "iteration_goal": "支持引用重映射和恢复",
+      "observable_outcome": "所有分析只指向保留身份",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "sample-chain",
+      "existing_entry": "PUT /api/observations/{id}/stages",
+      "existing_state": "样本与阶段没有流转链",
+      "iteration_goal": "支持分装检测和处置",
+      "observable_outcome": "来源闭包和数量守恒可验证",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "environment-correction",
+      "existing_entry": "PUT /api/comparisons",
+      "existing_state": "环境背景未建模",
+      "iteration_goal": "支持事件更正和上下文冻结",
+      "observable_outcome": "旧分析不被补录改写",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "evidence-lifecycle",
+      "existing_entry": "PUT /api/observations/{id}/stages",
+      "existing_state": "阶段没有证据生命周期",
+      "iteration_goal": "支持摘要校验引用和失效",
+      "observable_outcome": "损坏证据不破坏其他档案",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "job-fairness",
+      "existing_entry": "PUT /api/jobs",
+      "existing_state": "任务队列无公平策略",
+      "iteration_goal": "支持配额老化背压和暂停",
+      "observable_outcome": "任务等待和执行有上限",
+      "overlap_exclusions": []
+    },
+    {
+      "id": "query-projection",
+      "existing_entry": "GET /api/plots",
+      "existing_state": "查询依赖内存过滤",
+      "iteration_goal": "支持投影游标和一致性级别",
+      "observable_outcome": "分页稳定且授权变化不越权",
+      "overlap_exclusions": []
+    }
+  ]
+}

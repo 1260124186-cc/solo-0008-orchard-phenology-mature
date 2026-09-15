@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "pair_id": "orchard-phenology-0007-0008",
+  "role": "mature",
+  "counterpart": "solo-0007-orchard-phenology-core",
+  "contract": {
+    "domain": "orchard phenology archive",
+    "stack": [
+      "Vue",
+      "TypeScript",
+      "Python",
+      "SQLite"
+    ],
+    "entities": [
+      "plot",
+      "tree",
+      "observation",
+      "comparison",
+      "brief"
+    ],
+    "core_routes": [
+      "GET /api/plots",
+      "PUT /api/plots",
+      "PUT /api/observations",
+      "PUT /api/comparisons"
+    ],
+    "seed_namespace": "orchard-phenology"
+  },
+  "contract_sha256": "6b0d7dac1c99aaa6ddfa16dd9c94f8492cb3431bd98eaff54f11c216a7603a44"
+}

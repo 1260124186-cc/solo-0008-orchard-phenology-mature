@@ -1,0 +1,24 @@
+{
+  "name": "orchard-phenology-atlas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4317",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4317",
+    "test:backend": "PYTHONPATH=backend python3 -m unittest discover -s backend/tests -v",
+    "check": "npm run build && python3 -m compileall -q backend scripts && npm run test:backend && node scripts/workflow_check.mjs --workflow catalog && node scripts/workflow_check.mjs --workflow observe && node scripts/workflow_check.mjs --workflow compare"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.45.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "playwright": "^1.49.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vue-tsc": "^2.2.0"
+  }
+}
