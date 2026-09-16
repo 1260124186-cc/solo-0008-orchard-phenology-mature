@@ -118,6 +118,21 @@ class ApiHandlers:
     ) -> dict[str, Any]:
         return self.catalog.retire_tree(params["tree_id"], body)
 
+    def change_tree_status(
+        self,
+        *,
+        params: dict[str, str],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.catalog.change_tree_status(params["tree_id"], body)
+
+    def list_tree_status_history(
+        self,
+        *,
+        params: dict[str, str],
+    ) -> dict[str, Any]:
+        return self.catalog.get_tree_status_history(params["tree_id"])
+
     def list_observations(
         self,
         *,
@@ -418,6 +433,22 @@ def build_router(handlers: ApiHandlers) -> Router:
         "/api/trees/{tree_id}/close",
         handlers.retire_tree,
         capability="tree:write",
+        resource_kind="tree",
+        resource_id_param="tree_id",
+    )
+    router.add(
+        "PUT",
+        "/api/trees/{tree_id}/status",
+        handlers.change_tree_status,
+        capability="tree:write",
+        resource_kind="tree",
+        resource_id_param="tree_id",
+    )
+    router.add(
+        "GET",
+        "/api/trees/{tree_id}/status",
+        handlers.list_tree_status_history,
+        capability="tree:read",
         resource_kind="tree",
         resource_id_param="tree_id",
     )

@@ -5,6 +5,8 @@ import type {
   ObservationSummary,
   PlotDetail,
   PlotSummary,
+  TreeRecord,
+  TreeStatusHistory,
   WorkspaceKey,
 } from "../domain/types";
 import { api, errorMessage } from "../services/api";
@@ -116,6 +118,25 @@ export function useWorkspace() {
     if (!state.selectedPlotId) return;
     await api.confirmPlot(state.selectedPlotId, revision);
     await Promise.all([loadPlot(state.selectedPlotId), refreshPlots()]);
+  }
+
+  async function changeTreeStatus(
+    tree: TreeRecord,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await api.changeTreeStatus(tree.id, {
+      ...payload,
+      revision: tree.revision,
+    });
+    await Promise.all([
+      ...(state.selectedPlotId ? [loadPlot(state.selectedPlotId)] : []),
+      refreshPlots(),
+      refreshObservations(),
+    ]);
+  }
+
+  async function loadTreeStatusHistory(treeId: string): Promise<TreeStatusHistory> {
+    return (await api.treeStatusHistory(treeId)) as TreeStatusHistory;
   }
 
   async function refreshObservations(): Promise<void> {
@@ -283,6 +304,8 @@ export function useWorkspace() {
     createPlot,
     createTree,
     confirmSelectedPlot,
+    changeTreeStatus,
+    loadTreeStatusHistory,
     startObservation,
     addStage,
     removeStage,

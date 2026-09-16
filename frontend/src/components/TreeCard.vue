@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { CalendarDays, Sprout } from "@lucide/vue";
+import { treeStatusLabel } from "../domain/rules";
 import type { TreeRecord } from "../domain/types";
 
 defineProps<{
@@ -10,19 +11,13 @@ defineProps<{
 defineEmits<{
   select: [tree: TreeRecord];
 }>();
-
-const statusLabel: Record<TreeRecord["status"], string> = {
-  active: "在册",
-  retired: "已退休",
-  lost: "已遗失",
-};
 </script>
 
 <template>
   <button
     type="button"
     class="tree-card"
-    :class="{ 'is-selected': selected }"
+    :class="[`is-${tree.status}`, { 'is-selected': selected }]"
     data-check="tree-card"
     @click="$emit('select', tree)"
   >
@@ -35,7 +30,9 @@ const statusLabel: Record<TreeRecord["status"], string> = {
       <small>{{ tree.rootstock || "砧木未记录" }}</small>
     </span>
     <span class="tree-card__side">
-      <small>{{ statusLabel[tree.status] }}</small>
+      <small class="tree-card__status" :class="`is-${tree.status}`">
+        {{ treeStatusLabel(tree.status) }}
+      </small>
       <span>
         <CalendarDays :size="14" />
         {{ tree.planting_year }}

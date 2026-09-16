@@ -739,41 +739,306 @@ button:disabled {
   margin-top: 5px;
 }
 
+.tree-card.is-retired {
+  background: #f6f1e7;
+}
+
+.tree-card.is-lost {
+  background: #f8ede9;
+}
+
+.tree-card__status {
+  font-weight: 700;
+}
+
+.tree-card__status.is-active {
+  color: var(--moss-dark);
+}
+
+.tree-card__status.is-retired {
+  color: var(--ochre);
+}
+
+.tree-card__status.is-lost {
+  color: var(--vermilion);
+}
+
+.status-stamp.is-tree-active {
+  color: var(--moss-dark);
+  background: var(--moss-soft);
+  border-color: #aac0ad;
+}
+
+.status-stamp.is-tree-retired {
+  color: #7a5524;
+  background: var(--ochre-soft);
+  border-color: #dfbf8b;
+}
+
+.status-stamp.is-tree-lost {
+  color: var(--vermilion);
+  background: var(--vermilion-soft);
+  border-color: #ddb4a8;
+}
+
 .tree-focus {
+  display: block;
+  padding: 0;
+  background: transparent;
+}
+
+.tree-status-panel {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 15px 17px;
-  color: #e8f0ea;
-  background: #2b5140;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 17px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
   border-radius: 7px;
 }
 
-.tree-focus strong,
-.tree-focus small {
+.tree-status-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tree-status-panel__header strong,
+.tree-status-panel__header small {
   display: block;
 }
 
-.tree-focus strong {
+.tree-status-panel__header strong {
   margin: 4px 0 3px;
   font-size: 14px;
 }
 
-.tree-focus small {
-  color: #bdd1c2;
+.tree-status-panel__header small {
+  color: var(--ink-faint);
   font-family: "Noto Sans SC", sans-serif;
   font-size: 10px;
 }
 
-.tree-focus p {
-  max-width: 42%;
+.tree-status-panel__note {
   margin: 0;
-  color: #d2e0d5;
+  color: var(--ink-soft);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.tree-status-form {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 11px;
+  border-top: 1px dashed var(--line);
+}
+
+.tree-status-form__lead {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  color: var(--ink-soft);
   font-family: "Noto Sans SC", sans-serif;
   font-size: 11px;
   line-height: 1.6;
 }
+
+.tree-status-form__lead svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--ochre);
+}
+
+.tree-status-form label > span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--ink-faint);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+}
+
+.tree-status-form textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.tree-status-targets__options {
+  display: flex;
+  gap: 7px;
+}
+
+.status-choice {
+  flex: 1 1 0;
+  min-height: 34px;
+  padding: 6px 10px;
+  color: var(--ink-soft);
+  background: var(--paper-deep);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.status-choice.is-selected {
+  color: var(--vermilion);
+  background: var(--vermilion-soft);
+  border-color: #ddb4a8;
+  font-weight: 700;
+}
+
+.tree-status-targets__hint {
+  display: block;
+  margin-top: 5px !important;
+  color: var(--ink-faint) !important;
+  font-size: 10px !important;
+  line-height: 1.5;
+}
+
+.button--danger {
+  color: #fbf3f0;
+  background: var(--vermilion);
+  border: 1px solid var(--vermilion);
+}
+
+.button--danger:not(:disabled):hover {
+  background: #983d2e;
+}
+
+.text-button {
+  padding: 0;
+  color: var(--moss-dark);
+  background: none;
+  border: 0;
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.tree-status-history {
+  padding-top: 11px;
+  border-top: 1px dashed var(--line);
+}
+
+.tree-status-history > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tree-status-history h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.tree-status-history__continuity,
+.tree-status-history__empty {
+  margin: 7px 0 0;
+  color: var(--ink-faint);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.status-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status-timeline__item {
+  position: relative;
+  padding: 9px 10px 9px 12px;
+  background: var(--paper-deep);
+  border-left: 3px solid var(--line-strong);
+  border-radius: 0 5px 5px 0;
+}
+
+.status-timeline__item.is-active {
+  border-left-color: var(--moss);
+}
+
+.status-timeline__item.is-retired {
+  border-left-color: var(--ochre);
+}
+
+.status-timeline__item.is-lost {
+  border-left-color: var(--vermilion);
+}
+
+.status-timeline__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status-timeline__head small {
+  color: var(--ink-faint);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 9px;
+}
+
+.status-timeline__badge {
+  display: inline-block;
+  padding: 2px 7px;
+  color: var(--moss-dark);
+  background: var(--moss-soft);
+  border-radius: 999px;
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.status-timeline__item.is-retired .status-timeline__badge {
+  color: #7a5524;
+  background: var(--ochre-soft);
+}
+
+.status-timeline__item.is-lost .status-timeline__badge {
+  color: var(--vermilion);
+  background: var(--vermilion-soft);
+}
+
+.status-timeline__transition {
+  margin: 6px 0 2px;
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+.status-timeline__reason {
+  margin: 2px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.status-timeline__evidence {
+  margin: 2px 0;
+  color: var(--ink-soft);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.status-timeline__actor {
+  color: var(--ink-faint);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 9px;
+}
+
 
 .confirmation-band,
 .completion-band {
@@ -2059,15 +2324,10 @@ select {
     transform: rotate(90deg);
   }
 
-  .tree-focus,
   .confirmation-band,
   .completion-band {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .tree-focus p {
-    max-width: none;
   }
 
   .stage-track:not(.is-compact) {

@@ -1,5 +1,15 @@
 import { STAGE_BY_KEY } from "./stages";
-import type { ObservationSummary, PlotSummary, StageEntry, TreeRecord } from "./types";
+import type { ObservationSummary, PlotSummary, StageEntry, TreeRecord, TreeStatus } from "./types";
+
+export const TREE_STATUS_LABELS: Record<TreeStatus, string> = {
+  active: "在册",
+  retired: "已退休",
+  lost: "已遗失",
+};
+
+export function treeStatusLabel(status: TreeStatus): string {
+  return TREE_STATUS_LABELS[status] ?? status;
+}
 
 export interface FieldIssue {
   field: string;

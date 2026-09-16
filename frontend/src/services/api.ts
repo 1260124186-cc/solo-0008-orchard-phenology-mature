@@ -102,6 +102,13 @@ export const api = {
       method: "PUT",
       ...jsonBody(body),
     }),
+  changeTreeStatus: (id: string, body: unknown) =>
+    request(`/trees/${encodeURIComponent(id)}/status`, {
+      method: "PUT",
+      ...jsonBody(body),
+    }),
+  treeStatusHistory: (id: string) =>
+    request(`/trees/${encodeURIComponent(id)}/status`),
   listObservations: (query?: Record<string, QueryValue>) =>
     request(`/observations${encodeQuery(query)}`),
   getObservation: (id: string) =>

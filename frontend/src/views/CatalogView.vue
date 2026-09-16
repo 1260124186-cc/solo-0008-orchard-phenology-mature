@@ -14,6 +14,7 @@ import EmptyState from "../components/EmptyState.vue";
 import PlotForm from "../components/PlotForm.vue";
 import TreeCard from "../components/TreeCard.vue";
 import TreeForm from "../components/TreeForm.vue";
+import TreeStatusPanel from "../components/TreeStatusPanel.vue";
 import { formatTimestamp } from "../domain/rules";
 import { useWorkspace } from "../app/workspace";
 
@@ -174,12 +175,7 @@ function selectTree(tree: { id: string }) {
         </div>
 
         <aside v-if="selectedTree" class="tree-focus">
-          <div>
-            <span class="eyebrow">当前植株</span>
-            <strong>{{ selectedTree.code }} · {{ selectedTree.cultivar }}</strong>
-            <small>{{ selectedTree.rootstock }} / {{ selectedTree.planting_year }} 年定植</small>
-          </div>
-          <p>{{ selectedTree.note || "没有补充说明。" }}</p>
+          <TreeStatusPanel :tree="selectedTree" />
         </aside>
 
         <TreeForm

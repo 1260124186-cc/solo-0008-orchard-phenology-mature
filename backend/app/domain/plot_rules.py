@@ -35,6 +35,13 @@ TREE_FIELDS = {
     "note",
 }
 TREE_STATUSES = {"active", "retired", "lost"}
+TREE_CLOSING_STATUSES = {"retired", "lost"}
+TREE_STATUS_CHANGE_FIELDS = {"status", "reason", "evidence", "note", "revision"}
+TREE_STATUS_LABELS = {
+    "active": "在册",
+    "retired": "已退休",
+    "lost": "已遗失",
+}
 
 
 def now_iso() -> str:
@@ -207,6 +214,8 @@ def create_tree_record(
     payload: dict[str, Any],
     plot: dict[str, Any],
     timestamp: str,
+    *,
+    actor_id: str = "",
 ) -> dict[str, Any]:
     normalized = normalize_tree_payload(payload, allow_status=False)
     if normalized["plot_id"] != plot["id"]:
@@ -221,10 +230,22 @@ def create_tree_record(
             "植株定植年份不能早于园区起始种植年份",
             field_name="planting_year",
         )
+    history = [
+        build_status_event(
+            sequence=1,
+            previous_status=None,
+            status="active",
+            reason="建株入册",
+            evidence="建档登记",
+            actor_id=actor_id or "建档",
+            timestamp=timestamp,
+        )
+    ]
     return {
         "id": new_identifier("tree"),
         "schema_version": 1,
         **normalized,
+        "status_history": history,
         "revision": 1,
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -260,34 +281,118 @@ def ensure_tree_belongs_to_plot(
     return tree
 
 
-def retire_tree_record(
-    tree: dict[str, Any],
-    *,
-    status: str,
-    note: str | None,
-    expected_revision: int,
+def normalize_tree_status_change(
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
-    verify_revision(tree, expected_revision)
-    normalized_status = str(status or "").strip().lower()
-    if normalized_status not in {"retired", "lost"}:
-        raise ValidationError(
-            "结束状态只能是 retired 或 lost",
-            field_name="status",
-        )
-    if tree["status"] != "active":
-        raise PreconditionError("tree_already_closed", "植株已经结束在册状态")
+    reject_unknown_fields(payload, TREE_STATUS_CHANGE_FIELDS, label="植株状态变更")
     return {
-        **tree,
-        "status": normalized_status,
+        "status": str(payload.get("status") or "").strip().lower(),
+        "reason": clean_text(
+            payload.get("reason"),
+            "reason",
+            minimum=2,
+            maximum=300,
+        ),
+        "evidence": clean_text(
+            payload.get("evidence"),
+            "evidence",
+            minimum=2,
+            maximum=300,
+        ),
         "note": clean_text(
-            note if note is not None else tree["note"],
+            payload.get("note", ""),
             "note",
             maximum=500,
             required=False,
         ),
-        "revision": int(tree["revision"]) + 1,
-        "updated_at": now_iso(),
+        "revision": payload.get("revision"),
     }
+
+
+def change_tree_status_record(
+    tree: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    actor_id: str,
+    timestamp: str,
+) -> dict[str, Any]:
+    """在同一植株记录上推进状态，并追加不可变的状态变化条目。"""
+    normalized = normalize_tree_status_change(payload)
+    verify_revision(tree, normalized["revision"])
+    target_status = normalized["status"]
+    if target_status not in TREE_STATUSES:
+        raise ValidationError(
+            "植株状态不合法",
+            field_name="status",
+            details={"allowed": sorted(TREE_STATUSES)},
+        )
+    current_status = str(tree.get("status") or "")
+    if target_status == current_status:
+        raise PreconditionError(
+            "tree_status_unchanged",
+            f"植株已经是{TREE_STATUS_LABELS.get(target_status, target_status)}状态，"
+            "不能重复记录同一状态",
+            current=current_status,
+        )
+    history = ensure_tree_status_history(tree)
+    event = build_status_event(
+        sequence=len(history) + 1,
+        previous_status=current_status,
+        status=target_status,
+        reason=normalized["reason"],
+        evidence=normalized["evidence"],
+        actor_id=actor_id or "anonymous",
+        timestamp=timestamp,
+    )
+    history.append(event)
+    return {
+        **tree,
+        "status": target_status,
+        "note": normalized["note"],
+        "status_history": history,
+        "revision": int(tree["revision"]) + 1,
+        "updated_at": timestamp,
+    }
+
+
+def build_status_event(
+    *,
+    sequence: int,
+    previous_status: str | None,
+    status: str,
+    reason: str,
+    evidence: str,
+    actor_id: str,
+    timestamp: str,
+) -> dict[str, Any]:
+    return {
+        "sequence": sequence,
+        "previous_status": previous_status,
+        "status": status,
+        "reason": reason,
+        "evidence": evidence,
+        "actor_id": actor_id,
+        "changed_at": timestamp,
+    }
+
+
+def ensure_tree_status_history(tree: dict[str, Any]) -> list[dict[str, Any]]:
+    """返回植株状态变化序列，兼容建档时尚未保存状态序列的旧记录。"""
+    history = tree.get("status_history")
+    if isinstance(history, list) and history:
+        return history
+    timestamp = str(tree.get("created_at") or now_iso())
+    return [
+        build_status_event(
+            sequence=1,
+            previous_status=None,
+            status=str(tree.get("status") or "active"),
+            reason="建株入册",
+            evidence="建档登记",
+            actor_id="建档",
+            timestamp=timestamp,
+        )
+    ]
 
 
 def verify_revision(

@@ -5,19 +5,25 @@ from __future__ import annotations
 from typing import Any
 
 from ..domain.plot_rules import (
+    TREE_STATUS_LABELS,
+    change_tree_status_record,
     confirm_plot_record,
     create_plot_record,
     create_tree_record,
+    ensure_tree_status_history,
     ensure_unique_plot_code,
     ensure_unique_tree_code,
     normalize_plot_payload,
     now_iso,
     plot_summary,
-    retire_tree_record,
     update_plot_record,
 )
 from ..errors import NotFoundError, ValidationError
 from ..persistence import Repository
+from ..security import current_request_context
+
+
+TREE_STATUS_CHANGE_FIELDS = {"status", "reason", "evidence", "note", "revision"}
 
 
 PLOT_UPDATE_FIELDS = {
@@ -193,7 +199,12 @@ class CatalogService:
             plot = state["plots"].get(plot_id)
             if plot is None:
                 raise NotFoundError("园区", plot_id)
-            record = create_tree_record(payload, plot, now_iso())
+            record = create_tree_record(
+                payload,
+                plot,
+                now_iso(),
+                actor_id=current_request_context().actor_id,
+            )
             ensure_unique_tree_code(
                 state["trees"],
                 plot_id,
@@ -209,28 +220,84 @@ class CatalogService:
         tree_id: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        allowed = {"status", "note", "revision"}
-        unknown = sorted(set(payload) - allowed)
+        """兼容旧版结束接口：允许只给状态，原因与依据记为档案补录。"""
+        unknown = sorted(set(payload) - {"status", "note", "revision"})
         if unknown:
             raise ValidationError(
                 "植株结束操作包含不支持的字段",
                 details={"unknown_fields": unknown},
             )
+        status = str(payload.get("status") or "retired")
+        legacy_payload = {
+            "status": status,
+            "reason": f"按档案结束流程标记为{TREE_STATUS_LABELS.get(status, status)}",
+            "evidence": "旧版结束接口登记，未补充独立依据",
+            "revision": payload.get("revision"),
+        }
+        if payload.get("note") is not None:
+            legacy_payload["note"] = payload.get("note")
+        return self.change_tree_status(tree_id, legacy_payload)
+
+    def change_tree_status(
+        self,
+        tree_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        unknown = sorted(set(payload) - TREE_STATUS_CHANGE_FIELDS)
+        if unknown:
+            raise ValidationError(
+                "植株状态变更包含不支持的字段",
+                details={"unknown_fields": unknown},
+            )
+        if "revision" not in payload:
+            raise ValidationError("变更植株状态需要 revision", field_name="revision")
 
         def action(state: dict[str, Any]) -> dict[str, Any]:
             tree = state["trees"].get(tree_id)
             if tree is None:
                 raise NotFoundError("植株", tree_id)
-            updated = retire_tree_record(
+            updated = change_tree_status_record(
                 tree,
-                status=str(payload.get("status") or ""),
-                note=payload.get("note"),
-                expected_revision=payload.get("revision"),
+                payload,
+                actor_id=current_request_context().actor_id,
+                timestamp=now_iso(),
             )
             state["trees"][tree_id] = updated
             return updated
 
         return copy_tree(self.repository.atomic_update(action))
+
+    def get_tree_status_history(self, tree_id: str) -> dict[str, Any]:
+        state = self.repository.read()
+        tree = state["trees"].get(tree_id)
+        if tree is None:
+            raise NotFoundError("植株", tree_id)
+        history = ensure_tree_status_history(tree)
+        return {
+            "tree_id": tree_id,
+            "tree_code": tree["code"],
+            "current_status": tree["status"],
+            "current_status_label": TREE_STATUS_LABELS.get(
+                tree["status"],
+                tree["status"],
+            ),
+            "items": [
+                {
+                    **event,
+                    "status_label": TREE_STATUS_LABELS.get(
+                        event["status"],
+                        event["status"],
+                    ),
+                    "previous_status_label": (
+                        TREE_STATUS_LABELS.get(event["previous_status"])
+                        if event.get("previous_status")
+                        else None
+                    ),
+                }
+                for event in history
+            ],
+            "total": len(history),
+        }
 
     def _plot_detail(
         self,
@@ -266,4 +333,5 @@ def copy_tree(tree: dict[str, Any]) -> dict[str, Any]:
         "revision": tree["revision"],
         "created_at": tree["created_at"],
         "updated_at": tree["updated_at"],
+        "status_history": ensure_tree_status_history(tree),
     }

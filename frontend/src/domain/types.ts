@@ -32,6 +32,18 @@ export interface PlotDetail extends PlotSummary {
   trees: readonly TreeRecord[];
 }
 
+export interface TreeStatusEvent {
+  sequence: number;
+  previous_status: TreeStatus | null;
+  status: TreeStatus;
+  status_label: string;
+  previous_status_label: string | null;
+  reason: string;
+  evidence: string;
+  actor_id: string;
+  changed_at: string;
+}
+
 export interface TreeRecord {
   id: string;
   plot_id: string;
@@ -44,6 +56,16 @@ export interface TreeRecord {
   revision: number;
   created_at: string;
   updated_at: string;
+  status_history?: readonly TreeStatusEvent[];
+}
+
+export interface TreeStatusHistory {
+  tree_id: string;
+  tree_code: string;
+  current_status: TreeStatus;
+  current_status_label: string;
+  items: readonly TreeStatusEvent[];
+  total: number;
 }
 
 export interface StageEntry {
