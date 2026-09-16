@@ -95,7 +95,7 @@ async function checkTreeStatus(page) {
     rootstock: "杜梨",
     planting_year: 2011,
     status: "active",
-    note: "",
+    note: "东边坡地第三株，梯田边",
   });
   let season = await api("/observations", "PUT", {
     tree_id: tree.id,
@@ -153,6 +153,14 @@ async function checkTreeStatus(page) {
   if (plotDetail.trees[0].status !== "lost") {
     throw new Error("服务端植株状态未变为 lost");
   }
+  if (plotDetail.trees[0].note !== "东边坡地第三株，梯田边") {
+    throw new Error("关闭操作未传备注，却清空了原植株备注");
+  }
+  expectTransitionLabels(
+    plotDetail.trees[0].status_history,
+    [[null, "在册"], ["在册", "已遗失"]],
+    "关闭后植株详情内嵌沿革",
+  );
 
   // 观察记录：历史季节志仍指向同一植株（id 与编号均不变）
   let observations = await api(`/observations?tree_id=${encodeURIComponent(tree.id)}`);
@@ -215,6 +223,90 @@ async function checkTreeStatus(page) {
   if (plotDetail.trees[0].status !== "active") {
     throw new Error("恢复后服务端植株状态不是 active");
   }
+  if (plotDetail.trees[0].note !== "东边坡地第三株，梯田边") {
+    throw new Error("恢复操作未传备注，却清空了原植株备注");
+  }
+  expectTransitionLabels(
+    plotDetail.trees[0].status_history,
+    [[null, "在册"], ["在册", "已遗失"], ["已遗失", "在册"]],
+    "恢复后植株详情内嵌沿革",
+  );
+
+  // 接口返回：历史沿革接口的标签同样完整
+  expectTransitionLabels(
+    historyApi.items.map((event) => ({
+      previous_status_label: event.previous_status_label,
+      status_label: event.status_label,
+    })),
+    [[null, "在册"], ["在册", "已遗失"], ["已遗失", "在册"]],
+    "状态沿革接口",
+  );
+
+  // 再次关闭再恢复：验证第二次往返后痕迹与备注仍连续
+  let current = plotDetail.trees[0];
+  current = await api(`/trees/${encodeURIComponent(tree.id)}/status`, "PUT", {
+    status: "retired",
+    reason: "更新复壮，暂时退出常规观察",
+    evidence: "2026-06-01 管护记录",
+    revision: current.revision,
+  });
+  if (current.note !== "东边坡地第三株，梯田边") {
+    throw new Error("再次关闭清空了原植株备注");
+  }
+  current = await api(`/trees/${encodeURIComponent(tree.id)}/status`, "PUT", {
+    status: "active",
+    reason: "复壮后恢复常规观察",
+    evidence: "2026-09-01 复查记录",
+    revision: current.revision,
+  });
+  if (current.status !== "active" || current.id !== tree.id) {
+    throw new Error("再次恢复后植株身份或状态异常");
+  }
+  if (current.note !== "东边坡地第三株，梯田边") {
+    throw new Error("再次恢复清空了原植株备注");
+  }
+  expectTransitionLabels(
+    current.status_history,
+    [
+      [null, "在册"],
+      ["在册", "已遗失"],
+      ["已遗失", "在册"],
+      ["在册", "已退休"],
+      ["已退休", "在册"],
+    ],
+    "再次恢复后的完整沿革",
+  );
+
+  // 重新打开页面：只依赖植株详情内嵌沿革，必须仍按真实前后状态展示
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator('[data-check="nav-catalog"]').click();
+  await page.locator('[data-check="tree-card"]').first().click();
+  await page.locator('[data-check="tree-status-panel"]').waitFor();
+  const transitionTexts = await page
+    .locator('[data-check="tree-status-timeline"] .status-timeline__transition')
+    .allInnerTexts();
+  const expectedTransitions = [
+    "已退休 → 在册",
+    "在册 → 已退休",
+    "已遗失 → 在册",
+    "在册 → 已遗失",
+  ];
+  for (const expected of expectedTransitions) {
+    if (!transitionTexts.some((text) => text.replace(/\s/g, "").includes(expected.replace(/\s/g, "")))) {
+      throw new Error(
+        `重新打开页面后沿革缺少“${expected}”，实际：${JSON.stringify(transitionTexts)}`,
+      );
+    }
+  }
+  if (transitionTexts.some((text) => text.includes("建档入册"))) {
+    throw new Error(
+      `重新打开页面后真实状态变化退化成了建档入册：${JSON.stringify(transitionTexts)}`,
+    );
+  }
+  const panelNote = await page.locator(".tree-status-panel__note").innerText();
+  if (!panelNote.includes("东边坡地第三株")) {
+    throw new Error(`重新打开页面后植株备注未保留：${panelNote}`);
+  }
 
   // 观察记录与历史结果仍然指向同一植株
   observations = await api(`/observations?tree_id=${encodeURIComponent(tree.id)}`);
@@ -245,10 +337,10 @@ async function checkTreeStatus(page) {
     throw new Error("恢复后新季节志未挂到原植株");
   }
 
-  // 页面沿革展示三条痕迹
+  // 页面沿革展示五次状态记录
   const timelineRows = page.locator('[data-check^="tree-status-event-"]');
-  if ((await timelineRows.count()) !== 3) {
-    throw new Error("植株详情未展示完整的三次状态记录");
+  if ((await timelineRows.count()) !== 5) {
+    throw new Error("植株详情未展示完整的五次状态记录");
   }
 
   // 观察工作面切换到该植株时，历史季节志仍以原编号呈现
@@ -265,6 +357,16 @@ async function expectText(page, selector, expected, message) {
   const value = await page.locator(selector).innerText();
   if (!value.includes(expected)) {
     throw new Error(`${message}（实际：${value}）`);
+  }
+}
+
+function expectTransitionLabels(events, expected, label) {
+  const actual = events.map((event) => [
+    event.previous_status_label ?? null,
+    event.status_label,
+  ]);
+  if (actual.length !== expected.length || actual.some((row, i) => row[0] !== expected[i][0] || row[1] !== expected[i][1])) {
+    throw new Error(`${label}标签不正确：${JSON.stringify(actual)}`);
   }
 }
 

@@ -281,11 +281,33 @@ def ensure_tree_belongs_to_plot(
     return tree
 
 
+def tree_status_label(status: str | None) -> str:
+    if not status:
+        return ""
+    return TREE_STATUS_LABELS.get(status, status)
+
+
+def status_history_view(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """为持久化的原始状态事件补充中文标签，不改动事件本身。"""
+    return [
+        {
+            **event,
+            "status_label": tree_status_label(event.get("status")),
+            "previous_status_label": (
+                tree_status_label(event.get("previous_status"))
+                if event.get("previous_status")
+                else None
+            ),
+        }
+        for event in events
+    ]
+
+
 def normalize_tree_status_change(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     reject_unknown_fields(payload, TREE_STATUS_CHANGE_FIELDS, label="植株状态变更")
-    return {
+    normalized = {
         "status": str(payload.get("status") or "").strip().lower(),
         "reason": clean_text(
             payload.get("reason"),
@@ -299,14 +321,19 @@ def normalize_tree_status_change(
             minimum=2,
             maximum=300,
         ),
-        "note": clean_text(
-            payload.get("note", ""),
+        "revision": payload.get("revision"),
+    }
+    # 未显式提交备注时保留原备注；显式提交（含空串）才覆盖
+    if "note" in payload:
+        normalized["note"] = clean_text(
+            payload.get("note"),
             "note",
             maximum=500,
             required=False,
-        ),
-        "revision": payload.get("revision"),
-    }
+        )
+    else:
+        normalized["note"] = None
+    return normalized
 
 
 def change_tree_status_record(
@@ -345,10 +372,13 @@ def change_tree_status_record(
         timestamp=timestamp,
     )
     history.append(event)
+    next_note = (
+        normalized["note"] if normalized["note"] is not None else tree.get("note", "")
+    )
     return {
         **tree,
         "status": target_status,
-        "note": normalized["note"],
+        "note": next_note,
         "status_history": history,
         "revision": int(tree["revision"]) + 1,
         "updated_at": timestamp,

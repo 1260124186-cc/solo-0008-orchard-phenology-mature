@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from ..domain.plot_rules import (
-    TREE_STATUS_LABELS,
     change_tree_status_record,
     confirm_plot_record,
     create_plot_record,
@@ -16,6 +15,8 @@ from ..domain.plot_rules import (
     normalize_plot_payload,
     now_iso,
     plot_summary,
+    status_history_view,
+    tree_status_label,
     update_plot_record,
 )
 from ..errors import NotFoundError, ValidationError
@@ -230,11 +231,11 @@ class CatalogService:
         status = str(payload.get("status") or "retired")
         legacy_payload = {
             "status": status,
-            "reason": f"按档案结束流程标记为{TREE_STATUS_LABELS.get(status, status)}",
+            "reason": f"按档案结束流程标记为{tree_status_label(status)}",
             "evidence": "旧版结束接口登记，未补充独立依据",
             "revision": payload.get("revision"),
         }
-        if payload.get("note") is not None:
+        if "note" in payload:
             legacy_payload["note"] = payload.get("note")
         return self.change_tree_status(tree_id, legacy_payload)
 
@@ -277,25 +278,8 @@ class CatalogService:
             "tree_id": tree_id,
             "tree_code": tree["code"],
             "current_status": tree["status"],
-            "current_status_label": TREE_STATUS_LABELS.get(
-                tree["status"],
-                tree["status"],
-            ),
-            "items": [
-                {
-                    **event,
-                    "status_label": TREE_STATUS_LABELS.get(
-                        event["status"],
-                        event["status"],
-                    ),
-                    "previous_status_label": (
-                        TREE_STATUS_LABELS.get(event["previous_status"])
-                        if event.get("previous_status")
-                        else None
-                    ),
-                }
-                for event in history
-            ],
+            "current_status_label": tree_status_label(tree["status"]),
+            "items": status_history_view(history),
             "total": len(history),
         }
 
@@ -333,5 +317,5 @@ def copy_tree(tree: dict[str, Any]) -> dict[str, Any]:
         "revision": tree["revision"],
         "created_at": tree["created_at"],
         "updated_at": tree["updated_at"],
-        "status_history": ensure_tree_status_history(tree),
+        "status_history": status_history_view(ensure_tree_status_history(tree)),
     }

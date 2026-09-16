@@ -199,6 +199,92 @@ class TreeStatusLifecycleTests(unittest.TestCase):
                 revision=self.tree["revision"],
             )
 
+    def test_note_is_preserved_when_status_change_omits_it(self) -> None:
+        original_note = self.tree["note"]
+        closed = self._change(
+            "close-note",
+            status="lost",
+            reason="巡查未见萌发",
+            evidence="现场照片",
+            revision=self.tree["revision"],
+        )
+        self.assertEqual(closed["note"], original_note)
+        restored = self._change(
+            "restore-note",
+            status="active",
+            reason="复查后确认误判",
+            evidence="复查照片",
+            revision=closed["revision"],
+        )
+        self.assertEqual(restored["note"], original_note)
+
+    def test_explicit_note_replaces_original_and_empty_clears(self) -> None:
+        closed = self._change(
+            "close-with-note",
+            status="retired",
+            reason="移栽退出观察",
+            evidence="交接单",
+            note="移栽至南坡新园",
+            revision=self.tree["revision"],
+        )
+        self.assertEqual(closed["note"], "移栽至南坡新园")
+        restored = self._change(
+            "restore-clear-note",
+            status="active",
+            reason="误操作恢复",
+            evidence="核查记录",
+            note="",
+            revision=closed["revision"],
+        )
+        self.assertEqual(restored["note"], "")
+
+    def test_history_keeps_transitions_and_labels_after_reopen(self) -> None:
+        closed = self._change(
+            "close-reopen",
+            status="lost",
+            reason="连续两季未见萌发",
+            evidence="现场照片与笔录",
+            revision=self.tree["revision"],
+        )
+        self._change(
+            "restore-reopen",
+            status="active",
+            reason="复查发现根蘖重新萌发",
+            evidence="复查照片",
+            revision=closed["revision"],
+        )
+
+        # 重新打开仓储，模拟页面刷新后从持久层读取
+        self.repository.close()
+        self.repository = Repository(
+            Database(Path(self.temporary.name) / "atlas.sqlite3")
+        )
+        self.repository.open()
+        self.catalog = CatalogService(self.repository)
+
+        tree = self.catalog.get_tree(self.tree["id"])
+        events = tree["status_history"]
+        self.assertEqual(
+            [(event["previous_status"], event["status"]) for event in events],
+            [(None, "active"), ("active", "lost"), ("lost", "active")],
+        )
+        # 植株详情内嵌的沿革必须带中文标签，前端无需猜测
+        self.assertEqual(
+            [event["status_label"] for event in events],
+            ["在册", "已遗失", "在册"],
+        )
+        self.assertIsNone(events[0]["previous_status_label"])
+        self.assertEqual(events[1]["previous_status_label"], "在册")
+        self.assertEqual(events[2]["previous_status_label"], "已遗失")
+
+        detail = self.catalog.get_plot(self.plot["id"])
+        embedded = detail["trees"][0]["status_history"]
+        self.assertEqual(
+            [event["previous_status_label"] for event in embedded],
+            [None, "在册", "已遗失"],
+        )
+        self.assertEqual(detail["trees"][0]["note"], "建档时备注")
+
     def test_historical_observations_remain_attached_after_changes(self) -> None:
         with _request("admin", "season-before-close"):
             season = self.observations.start_observation(

@@ -243,7 +243,12 @@ async function submit() {
           </div>
           <p class="status-timeline__transition">
             <template v-if="event.previous_status_label">
-              {{ event.previous_status_label }} → {{ event.status_label ?? treeStatusLabel(event.status) }}
+              {{ event.previous_status_label }} →
+              {{ event.status_label ?? treeStatusLabel(event.status) }}
+            </template>
+            <template v-else-if="event.previous_status">
+              {{ treeStatusLabel(event.previous_status) }} →
+              {{ event.status_label ?? treeStatusLabel(event.status) }}
             </template>
             <template v-else>建档入册</template>
           </p>
