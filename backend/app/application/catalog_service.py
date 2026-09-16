@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..domain.code_correction import (
+    apply_plot_code_correction,
+    build_identity_report,
+    build_plot_code_plan,
+    repair_tree_code,
+)
 from ..domain.plot_rules import (
     confirm_plot_record,
     create_plot_record,
@@ -18,6 +24,7 @@ from ..domain.plot_rules import (
 )
 from ..errors import NotFoundError, ValidationError
 from ..persistence import Repository
+from ..security.context import current_request_context
 
 
 PLOT_UPDATE_FIELDS = {
