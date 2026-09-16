@@ -2783,3 +2783,18 @@ select {
 .lineage-book__row.is-replaced-transit {
   background: #f3ecdd;
 }
+
+/* 环回：回到已出现阶段 */
+.lineage-book__row.is-restored {
+  background: #eef4e2;
+  box-shadow: inset 3px 0 0 #5f7a3d;
+}
+
+.lineage-book__restored {
+  color: #47602e;
+}
+
+.replacement-flow__hop.is-cycle-from .replacement-flow__from {
+  color: #8a6a3c;
+  text-decoration: line-through;
+}

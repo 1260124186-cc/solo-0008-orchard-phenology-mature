@@ -64,7 +64,8 @@ export interface EntryLineage {
     | "revised"
     | "replaced_out"
     | "replaced_in"
-    | "replaced_transit";
+    | "replaced_transit"
+    | "restored";
   replacement_stage: string | null;
   replaced_from_stage: string | null;
   frozen: {

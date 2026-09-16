@@ -270,73 +270,82 @@ def _entry_lineage(
             "note": entry.get("note", ""),
         }
 
-    # 每个阶段进入当前事实时的事实快照与勘误（沿 hops 回溯到最后一跳）。
+    # 每个阶段最后一次“进入当前事实”的跳（连续替换/环回时以最后一跳为准）。
     introduced_at: dict[str, dict[str, Any]] = {}
+    touched_by_replacement: set[str] = set()
     for hop in hops:
         introduced_at[hop["to_stage"]] = hop
+        touched_by_replacement.add(hop["from_stage"])
+        touched_by_replacement.add(hop["to_stage"])
+
+    # 所有出现过的阶段身份：冻结阶段 ∪ 替换进入阶段。按身份聚合，每阶段一行。
+    stage_identities = set(frozen_index) | {hop["to_stage"] for hop in hops}
 
     lineage: list[dict[str, Any]] = []
-    for frozen_entry in frozen:
-        stage = frozen_entry["stage"]
-        if stage in replaced_to:
+    for stage in stage_identities:
+        frozen_entry = frozen_index.get(stage)
+        current = effective_index.get(stage)
+        was_replaced_out = stage in replaced_to
+        introduced = introduced_at.get(stage)
+
+        if current is not None:
+            # 当前轨道中存在该阶段。
+            if frozen_entry is not None and stage in replaced_from:
+                # 先被移出过、又由后续替换回到本阶段（环回）。
+                status = "restored"
+                revised = (
+                    current["observed_on"] != frozen_entry["observed_on"]
+                    or int(current["confidence"]) != int(frozen_entry["confidence"])
+                    or current.get("note", "") != frozen_entry.get("note", "")
+                )
+            elif frozen_entry is not None and last_change.get(stage):
+                status = "revised"
+                revised = (
+                    current["observed_on"] != frozen_entry["observed_on"]
+                    or int(current["confidence"]) != int(frozen_entry["confidence"])
+                    or current.get("note", "") != frozen_entry.get("note", "")
+                )
+            elif introduced is not None:
+                status = "replaced_in"
+                revised = True
+            else:
+                status = "unchanged"
+                revised = False
             lineage.append(
                 {
                     "stage": stage,
-                    "status": "replaced_out",
-                    "replacement_stage": replaced_to[stage],
-                    "replaced_from_stage": None,
+                    "status": status,
+                    # 当前阶段没有“后续去向”。
+                    "replacement_stage": None,
+                    "replaced_from_stage": replaced_from.get(stage),
+                    "frozen": snapshot(frozen_entry),
+                    "current": snapshot(current),
+                    "revised": revised,
+                    "correction_id": (introduced or {}).get("correction_id")
+                    or last_change.get(stage),
+                }
+            )
+        else:
+            # 当前轨道已无该阶段：中途替换进入又移出（transit），或起点被移出。
+            is_transit = frozen_entry is None or stage in replaced_from
+            lineage.append(
+                {
+                    "stage": stage,
+                    "status": "replaced_transit" if is_transit else "replaced_out",
+                    "replacement_stage": replaced_to.get(stage),
+                    "replaced_from_stage": replaced_from.get(stage),
                     "frozen": snapshot(frozen_entry),
                     "current": None,
                     "revised": False,
-                    "correction_id": introduced_at.get(replaced_to[stage], {}).get(
-                        "correction_id"
-                    ),
+                    "correction_id": (introduced or {}).get("correction_id"),
                 }
             )
-            continue
-        current = effective_index.get(stage)
-        revised = current is not None and (
-            current["observed_on"] != frozen_entry["observed_on"]
-            or int(current["confidence"]) != int(frozen_entry["confidence"])
-            or current.get("note", "") != frozen_entry.get("note", "")
-        )
-        lineage.append(
-            {
-                "stage": stage,
-                "status": "revised" if revised else "unchanged",
-                "replacement_stage": None,
-                "replaced_from_stage": None,
-                "frozen": snapshot(frozen_entry),
-                "current": snapshot(current) or snapshot(frozen_entry),
-                "revised": revised,
-                "correction_id": last_change.get(stage),
-            }
-        )
 
-    # 由替换进入的阶段（含连续替换中的中间阶段）。
-    for stage, source_stage in replaced_from.items():
-        incoming = introduced_at.get(stage)
-        is_final = stage in effective_index
-        current = effective_index.get(stage)
-        lineage.append(
-            {
-                "stage": stage,
-                "status": "replaced_in" if is_final else "replaced_transit",
-                "replacement_stage": replaced_to.get(stage),
-                "replaced_from_stage": source_stage,
-                "frozen": None,
-                "current": snapshot(current),
-                "revised": True,
-                "correction_id": incoming.get("correction_id") if incoming else None,
-            }
-        )
-
-    # 阶段按物候顺序排列；相同阶段不会重复，连续替换的中间阶段也各占一行。
     return sorted(
         lineage,
         key=lambda item: (
             STAGE_BY_KEY.get(item["stage"], STAGES[-1]).rank,
-            0 if item["status"] in {"unchanged", "replaced_out", "revised"} else 1,
+            0 if item["current"] is not None else 1,
         ),
     )
 
@@ -349,6 +358,7 @@ def _replacement_chain(
     from .correction_rules import replay
 
     result = replay(observation, corrections)
+    current_stages = {item["stage"] for item in result["entries"]}
     chain: list[dict[str, Any]] = []
     for index, hop in enumerate(result["hops"], start=1):
         chain.append(
@@ -362,7 +372,8 @@ def _replacement_chain(
                 "correction_id": hop["correction_id"],
                 "adoption_seq": hop["adoption_seq"],
                 "adopted_at": hop["adopted_at"],
-                "to_still_current": hop["to_stage"] not in result["replaced_to"],
+                # 是否仍在当前轨道：以最终事实集为准，环回到已出现阶段也算当前。
+                "to_still_current": hop["to_stage"] in current_stages,
             }
         )
     return chain

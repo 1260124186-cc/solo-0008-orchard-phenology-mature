@@ -14,6 +14,7 @@ function statusText(line: EntryLineage): string {
     replaced_out: "误录阶段 · 已从当前事实移除",
     replaced_transit: "中间阶段 · 已替换进入又被后续勘误替换",
     replaced_in: "替换进入的最终正确阶段",
+    restored: "曾被移出过，最终改回此阶段（当前采用）",
   }[line.status];
 }
 </script>
@@ -91,6 +92,11 @@ function statusText(line: EntryLineage): string {
                 ，又替换为
                 {{ line.replacement_stage ? stageLabel(line.replacement_stage) : "" }}
               </b>
+            </template>
+            <template v-else-if="line.status === 'restored' && line.current">
+              <em class="lineage-book__arrow">→</em>
+              <b class="lineage-book__restored">{{ line.current.observed_on }}</b>
+              <small>置信 {{ line.current.confidence }}/5 · 改回此阶段</small>
             </template>
             <template v-else-if="line.current">
               <em

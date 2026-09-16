@@ -1051,6 +1051,103 @@ class StageReplacementTests(unittest.TestCase):
             {entry["stage"] for entry in detail["frozen_entries"]},
         )
 
+    def test_replacement_cycle_back_to_original_stage_has_single_final_line(
+        self,
+    ) -> None:
+        # A(fruit_growth) -> B(petal_fall) -> A(fruit_growth)，回到最初阶段
+        left, _ = self._seed_pair()
+
+        def adopt_replace(key: str, source: str, target: str, observed_on: str):
+            with _request("local-admin", f"{key}-create"):
+                proposal = self.corrections.create_correction(
+                    {
+                        "observation_id": left["id"],
+                        "reason": f"{source} 与 {target} 之间的环回订正",
+                        "changes": [
+                            {
+                                "change_type": "replace",
+                                "stage": source,
+                                "correct_stage": target,
+                                "observed_on": observed_on,
+                                "confidence": 4,
+                                "note": "",
+                            }
+                        ],
+                    }
+                )
+            with _request(
+                "local-admin",
+                f"{key}-adopt",
+                request_path=f"/api/corrections/{proposal['id']}/adopt",
+                route_template="/api/corrections/{correction_id}/adopt",
+            ):
+                self.corrections.adopt_correction(
+                    proposal["id"],
+                    {"revision": proposal["revision"]},
+                )
+            return proposal
+
+        adopt_replace("rep-cycle-1", "fruit_growth", "petal_fall", "2026-04-12")
+        adopt_replace("rep-cycle-2", "petal_fall", "fruit_growth", "2026-05-22")
+
+        detail = self.observations.get_observation(left["id"])
+        current_stages = [entry["stage"] for entry in detail["entries"]]
+
+        # 当前轨道采用最初阶段，且只出现一次。
+        self.assertIn("fruit_growth", current_stages)
+        self.assertNotIn("petal_fall", current_stages)
+        self.assertEqual(
+            sum(1 for stage in current_stages if stage == "fruit_growth"),
+            1,
+        )
+        self.assertEqual(
+            detail["entry_map"]["fruit_growth"]["observed_on"],
+            "2026-05-22",
+        )
+
+        # 每个阶段在谱系中恰有一行（回到的阶段不重复出现移出行+进入行）。
+        counts: dict[str, int] = {}
+        for line in detail["entry_lineage"]:
+            counts[line["stage"]] = counts.get(line["stage"], 0) + 1
+        self.assertEqual(counts["fruit_growth"], 1)
+        self.assertEqual(counts["petal_fall"], 1)
+
+        lineage = {line["stage"]: line for line in detail["entry_lineage"]}
+        final = lineage["fruit_growth"]
+        self.assertEqual(final["status"], "restored")
+        # 最终行只显示来源，不显示后续去向。
+        self.assertEqual(final["replaced_from_stage"], "petal_fall")
+        self.assertIsNone(final["replacement_stage"])
+        self.assertEqual(final["current"]["observed_on"], "2026-05-22")
+        self.assertEqual(final["frozen"]["observed_on"], "2026-05-20")
+
+        # 中间阶段仍标明来源与去向，且不在当前轨道。
+        transit = lineage["petal_fall"]
+        self.assertEqual(transit["status"], "replaced_transit")
+        self.assertEqual(transit["replaced_from_stage"], "fruit_growth")
+        self.assertEqual(transit["replacement_stage"], "fruit_growth")
+        self.assertIsNone(transit["current"])
+
+        # 每跳“是否仍在当前轨道”按最终事实集计算。
+        chain = detail["replacement_chain"]
+        self.assertEqual(
+            [(hop["from_stage"], hop["to_stage"]) for hop in chain],
+            [("fruit_growth", "petal_fall"), ("petal_fall", "fruit_growth")],
+        )
+        self.assertFalse(chain[0]["to_still_current"])
+        self.assertTrue(chain[1]["to_still_current"])
+
+        # 原始冻结事实保持最初误录阶段与其日期。
+        raw = self.repository.read()["observations"][left["id"]]
+        self.assertEqual(
+            next(
+                entry
+                for entry in raw["entries"]
+                if entry["stage"] == "fruit_growth"
+            )["observed_on"],
+            "2026-05-20",
+        )
+
     def test_frozen_comparison_and_brief_keep_old_generation_after_replacement(
         self,
     ) -> None:

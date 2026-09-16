@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-"""连续阶段替换的版本关系自证脚本。
+"""阶段替换“回到最初阶段”的版本关系自证脚本。
 
 示例：某株树一条观察先被误选成“果实膨大期”（fruit_growth，05-20），
 核对台账后第一次勘误确认它是 04-12 的“落瓣期”（petal_fall）；随后再次
-核对，发现同一观察其实是 03-05 的“芽膨大期”（bud_swell）。于是形成
-两跳替换链：
+核对，确认同一观察其实仍是“果实膨大期”，但日期应修正为 05-22。于是形成
+一个环回替换链：
 
-    fruit_growth(05-20) → petal_fall(04-12) → bud_swell(03-05)
-    误录起点            中间阶段            最终正确阶段
+    fruit_growth(05-20) → petal_fall(04-12) → fruit_growth(05-22)
+    最初阶段             中间阶段            最终（改回最初阶段）
 
 脚本核对：
-1. 当前轨道只保留最终阶段 bud_swell 且只出现一次；起点与中间阶段都移除；
-2. 详情替换链完整记录两跳，中间阶段明确“从哪来、又去了哪”；谱系中起点为
-   replaced_out、中间阶段为 replaced_transit、终点为 replaced_in；
-3. 原始冻结事实仍保留最初误录阶段；每次替换前的旧比较/简报世代都被冻结、
-   标记为历史，且只能显式接续新版；
-4. 关闭数据库并以全新仓储重新打开后，谱系、旧分析和新分析仍能一条链对上。
+1. 当前轨道采用最初阶段 fruit_growth 且只出现一次，中间阶段 petal_fall 移除；
+2. 最终阶段在谱系中只有一行，状态 restored，只显示来源（petal_fall）、不显示
+   后续去向；同名阶段不会同时出现“移出”和“进入”两行；
+3. 替换链两跳按采纳顺序排列，每跳“是否仍在当前轨道”以最终事实集计算：
+   第一跳的 petal_fall 已非当前，第二跳的 fruit_growth 仍为当前；
+4. 原始冻结事实保留最初误录日期；每代比较/简报都被冻结、只能显式接续新版；
+5. 关闭数据库并以全新仓储重新打开后，链条、当前轨道、旧分析和新分析仍一致。
 
 用法：python3 scripts/verify_stage_replacement.py [--data-dir DIR]
 """
@@ -162,6 +163,7 @@ def main() -> int:
             ("full_bloom", "2026-04-05"),
             ("petal_fall", "2026-04-15"),
             ("fruit_set", "2026-04-22"),
+            ("fruit_growth", "2026-05-25"),
             ("harvest", "2026-09-07"),
         ],
     )
@@ -223,13 +225,13 @@ def main() -> int:
     with scope("r-brief-1"):
         brief_g1 = briefs.create_brief(plot["id"], {"title": "第一次替换后简报"})
 
-    # 第二代：petal_fall → bud_swell（连续替换中间阶段）
+    # 第二代：petal_fall → fruit_growth（回到最初阶段，日期修正为 05-22）
     correction_g2 = adopt_replace(
         "r-rep-2",
         "petal_fall",
-        "bud_swell",
-        "2026-03-05",
-        "再次核对，同一观察实为03-05芽膨大期",
+        "fruit_growth",
+        "2026-05-22",
+        "复核后确认同一观察仍是果实膨大期，日期修正为05-22",
     )
     # 第二次替换后隐式重算必须被拒绝
     implicit_blocked = False
@@ -281,39 +283,41 @@ def main() -> int:
         checks.append((name, actual == expected, actual, expected))
 
     current_stages = [entry["stage"] for entry in detail["entries"]]
+    lineage_counts: dict[str, int] = {}
+    for line in detail["entry_lineage"]:
+        lineage_counts[line["stage"]] = lineage_counts.get(line["stage"], 0) + 1
 
-    # 当前轨道只剩最终阶段
-    check("当前轨道含最终阶段 bud_swell", "bud_swell" in current_stages, True)
+    # 当前轨道改回最初阶段，且只出现一次
+    check("当前轨道采用最初阶段 fruit_growth", "fruit_growth" in current_stages, True)
     check("当前轨道移除中间阶段 petal_fall", "petal_fall" not in current_stages, True)
-    check("当前轨道移除起点 fruit_growth", "fruit_growth" not in current_stages, True)
     check(
-        "最终阶段只出现一次",
-        sum(1 for stage in current_stages if stage == "bud_swell"),
+        "最初阶段在当前轨道只出现一次",
+        sum(1 for stage in current_stages if stage == "fruit_growth"),
         1,
     )
     check(
-        "最终阶段日期为真值",
-        detail["entry_map"]["bud_swell"]["observed_on"],
-        "2026-03-05",
+        "最初阶段当前日期为修正值",
+        detail["entry_map"]["fruit_growth"]["observed_on"],
+        "2026-05-22",
     )
+    check("谱系中最初阶段只有一行", lineage_counts.get("fruit_growth"), 1)
+    check("谱系中中间阶段只有一行", lineage_counts.get("petal_fall"), 1)
 
-    # 替换链两跳完整
+    # 替换链两跳完整；to_still_current 按最终事实集判定
     check("替换链跳数", len(chain), 2)
     check(
         "替换链两跳顺序",
         [(hop["from_stage"], hop["to_stage"]) for hop in chain],
-        [("fruit_growth", "petal_fall"), ("petal_fall", "bud_swell")],
+        [("fruit_growth", "petal_fall"), ("petal_fall", "fruit_growth")],
     )
-    check("第一跳的中间阶段已非当前", chain[0]["to_still_current"], False)
-    check("第二跳的最终阶段仍为当前", chain[1]["to_still_current"], True)
+    check("第一跳进入的中间阶段已非当前", chain[0]["to_still_current"], False)
+    check("第二跳改回的最初阶段仍为当前", chain[1]["to_still_current"], True)
     check("第一跳勘误", chain[0]["correction_id"], correction_g1["id"])
     check("第二跳勘误", chain[1]["correction_id"], correction_g2["id"])
     check("第一跳日期", chain[0]["observed_on"], "2026-04-12")
-    check("第二跳日期", chain[1]["observed_on"], "2026-03-05")
+    check("第二跳日期", chain[1]["observed_on"], "2026-05-22")
 
-    # 谱系三段齐全
-    check("起点谱系 replaced_out", lineage["fruit_growth"]["status"], "replaced_out")
-    check("起点去向", lineage["fruit_growth"]["replacement_stage"], "petal_fall")
+    # 谱系：中间阶段 transit；最终阶段 restored 单行、只来不去
     check(
         "中间阶段谱系 replaced_transit",
         lineage["petal_fall"]["status"],
@@ -327,23 +331,41 @@ def main() -> int:
     check(
         "中间阶段后续去向",
         lineage["petal_fall"]["replacement_stage"],
-        "bud_swell",
+        "fruit_growth",
     )
     check("中间阶段无当前值", lineage["petal_fall"]["current"], None)
-    check("终点谱系 replaced_in", lineage["bud_swell"]["status"], "replaced_in")
-    check("终点来源", lineage["bud_swell"]["replaced_from_stage"], "petal_fall")
-    check("终点无后续去向", lineage["bud_swell"]["replacement_stage"], None)
+    check("最终阶段谱系 restored", lineage["fruit_growth"]["status"], "restored")
     check(
-        "终点当前日期",
-        lineage["bud_swell"]["current"]["observed_on"],
-        "2026-03-05",
+        "最终阶段只显示来源",
+        lineage["fruit_growth"]["replaced_from_stage"],
+        "petal_fall",
+    )
+    check("最终阶段不显示后续去向", lineage["fruit_growth"]["replacement_stage"], None)
+    check(
+        "最终阶段当前日期",
+        lineage["fruit_growth"]["current"]["observed_on"],
+        "2026-05-22",
+    )
+    check(
+        "最终阶段仍可查最初冻结日期",
+        lineage["fruit_growth"]["frozen"]["observed_on"],
+        "2026-05-20",
     )
 
-    # 原始冻结事实仍是最初误录阶段
+    # 原始冻结事实仍是最初误录阶段与日期
     check(
-        "原始记录保留误录起点",
+        "原始记录保留最初阶段",
         "fruit_growth" in [entry["stage"] for entry in raw_left["entries"]],
         True,
+    )
+    check(
+        "原始记录日期仍为冻结值",
+        next(
+            entry
+            for entry in raw_left["entries"]
+            if entry["stage"] == "fruit_growth"
+        )["observed_on"],
+        "2026-05-20",
     )
     check("原始季节志修订号不变", raw_left["revision"], left["revision"])
 
@@ -360,6 +382,12 @@ def main() -> int:
         correction_g2["id"],
     )
     check("隐式重算被拒绝", implicit_blocked, True)
+    final_offsets = {
+        item["stage"]: item["offset_days"] for item in g2["stage_offsets"]
+    }
+    check("当前图谱不含中间阶段", "petal_fall" not in final_offsets, True)
+    check("当前图谱采用回到的最初阶段", "fruit_growth" in final_offsets, True)
+    check("当前图谱果实膨大期偏移为右05-25减左05-22", final_offsets["fruit_growth"], 3)
     current_comparisons = [
         item
         for item in comparisons.list_comparisons()["items"]
@@ -374,21 +402,30 @@ def main() -> int:
     final_left = next(
         item for item in b2["payload"]["observations"] if item["id"] == left["id"]
     )
-    check("当前简报采用最终阶段", "bud_swell" in final_left["entry_map"], True)
+    check("当前简报采用最初阶段", "fruit_growth" in final_left["entry_map"], True)
+    check(
+        "当前简报不含中间阶段",
+        "petal_fall" not in final_left["entry_map"],
+        True,
+    )
     check(
         "当前简报替换链完整",
         [
             (hop["from_stage"], hop["to_stage"])
             for hop in final_left["replacement_chain"]
         ],
-        [("fruit_growth", "petal_fall"), ("petal_fall", "bud_swell")],
+        [("fruit_growth", "petal_fall"), ("petal_fall", "fruit_growth")],
     )
     first_left = next(
         item for item in b0["payload"]["observations"] if item["id"] == left["id"]
     )
-    check("第零代简报保留误录阶段", "fruit_growth" in first_left["entry_map"], True)
+    check(
+        "第零代简报保留最初冻结日期",
+        first_left["entry_map"]["fruit_growth"]["observed_on"],
+        "2026-05-20",
+    )
 
-    print("== 连续阶段替换 · 完整谱系版本关系验证 ==")
+    print("== 回到最初阶段 · 环回替换版本关系验证 ==")
     width = max(len(name) for name, *_ in checks)
     failed = 0
     for name, ok, actual, expected in checks:
@@ -399,11 +436,11 @@ def main() -> int:
     print("-" * 64)
     print(
         "替换链：fruit_growth(05-20) → petal_fall(04-12, 中间) → "
-        "bud_swell(03-05, 当前)"
+        "fruit_growth(05-22, 改回最初阶段)"
     )
     print(
-        "图谱链：第零代(误录) → 第一代 → 第二代(当前)，"
-        "关闭重开后谱系、旧分析、新分析仍一一对应"
+        "图谱链：第零代(误录) → 第一代(中间阶段) → 第二代(改回)，"
+        "关闭重开后谱系、当前轨道、旧分析、新分析仍一一对应"
     )
 
     reopened.close()
