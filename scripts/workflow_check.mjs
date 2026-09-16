@@ -13,7 +13,9 @@ const UI_ORIGIN = "http://127.0.0.1:4317";
 const workflow = valueAfter("--workflow");
 
 if (!workflow) {
-  console.error("用法：node scripts/workflow_check.mjs --workflow catalog|observe|compare");
+  console.error(
+    "用法：node scripts/workflow_check.mjs --workflow catalog|observe|compare|correction",
+  );
   process.exit(2);
 }
 
@@ -57,6 +59,8 @@ try {
     await checkObservation(page);
   } else if (workflow === "compare") {
     await checkComparison(page);
+  } else if (workflow === "correction") {
+    await checkCorrection(page);
   } else {
     throw new Error(`未知工作流：${workflow}`);
   }
@@ -216,6 +220,194 @@ async function checkComparison(page) {
   }
 }
 
+async function checkCorrection(page) {
+  // 准备两份同年完成季节志、一份冻结图谱和一份冻结简报。
+  // 编号顺序保证默认选择器左=被勘误季节志、右=对照季节志。
+  const first = await seedCompletedSeason({
+    plotCode: "OR-2402",
+    plotName: "北坞老梨园",
+    cultivar: "秋白梨",
+    treeCode: "OR-2402-T01",
+    season: "2026",
+    dates: ["2026-03-10", "2026-04-01", "2026-04-18", "2026-09-02"],
+  });
+  const second = await seedCompletedSeason({
+    plotCode: "OR-2401",
+    plotName: "南坞梨园",
+    cultivar: "蜜香梨",
+    treeCode: "OR-2401-T01",
+    season: "2026",
+    dates: ["2026-03-15", "2026-04-05", "2026-04-22", "2026-09-07"],
+  });
+  const firstPlot = await api(`/plots`, "GET");
+  const plotForBrief = firstPlot.items.find((item) => item.code === "OR-2402");
+  await api(`/plots/${plotForBrief.id}/briefs`, "PUT", {
+    title: "勘误前简报",
+  });
+  const comparisonBefore = await api("/comparisons", "PUT", {
+    title: "勘误前对齐",
+    left_observation_id: first.id,
+    right_observation_id: second.id,
+  });
+
+  // 详情入口：提出一条随后撤回的勘误，事实不得变化
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator('[data-check="nav-observation"]').click();
+  await page.locator('[data-check="observation-list-item"]', {
+      hasText: "OR-2402-T01",
+    })
+    .first()
+    .click();
+  await page.locator('[data-check="season-status"]').waitFor();
+  await page.locator('[data-check="open-correction"]').click();
+  await page.locator('[data-check="correction-stage"]').click();
+  await page.locator('[data-choice-value="harvest"]').click();
+  await page.locator('[data-check="correction-date"]').fill("2026-08-30");
+  await page.locator('[data-check="correction-reason"]').fill(
+    "误填的撤回用勘误建议内容",
+  );
+  await page.locator('[data-check="submit-correction"]').click();
+  await page.getByText("勘误已提交，等待受控采纳").waitFor();
+  await page.locator('[data-check="correction-pending-item"]').waitFor();
+  await page.locator('[data-check="withdraw-correction"]').click();
+  await page.getByText("勘误已撤回").waitFor();
+  await page.locator('[data-check="correction-resolved"]').waitFor();
+
+  // 详情入口：正式提出并采纳采收期勘误
+  await page.locator('[data-check="open-correction"]').click();
+  await page.locator('[data-check="correction-stage"]').click();
+  await page.locator('[data-choice-value="harvest"]').click();
+  await page.locator('[data-check="correction-date"]').fill("2026-09-05");
+  await page.locator('[data-check="correction-reason"]').fill(
+    "核对现场纸质台账，采收日期登记偏早三天",
+  );
+  await page.locator('[data-check="submit-correction"]').click();
+  await page.getByText("勘误已提交，等待受控采纳").waitFor();
+  await page.locator('[data-check="adopt-correction"]').click();
+  await page
+    .getByText("勘误已采纳：当前事实更新，原始结论保留为历史")
+    .waitFor();
+
+  // 详情页必须同时显示当前事实与冻结事实
+  await page.locator('[data-check="season-corrected"]').waitFor();
+  const harvestLineage = page
+    .locator('[data-stage="harvest"][data-check="lineage-row"]');
+  await harvestLineage.waitFor();
+  const lineageText = await harvestLineage.innerText();
+  if (!lineageText.includes("2026-09-02") || !lineageText.includes("2026-09-05")) {
+    throw new Error("详情未同时呈现冻结事实与当前事实");
+  }
+
+  const observations = await api(
+    `/observations?tree_id=${encodeURIComponent(first.tree_id)}`,
+  );
+  const updated = observations.items[0];
+  if (updated.entry_map.harvest.observed_on !== "2026-09-05") {
+    throw new Error("采纳后当前事实未更新");
+  }
+  const frozenHarvest = updated.frozen_entries.find(
+    (entry) => entry.stage === "harvest",
+  );
+  if (frozenHarvest.observed_on !== "2026-09-02") {
+    throw new Error("原始完成事实被改写");
+  }
+
+  // 比较入口：旧图谱冻结为历史，直接重算必须被拒绝
+  const oldComparison = await api(`/comparisons/${comparisonBefore.id}`);
+  if (oldComparison.basis_status !== "superseded") {
+    throw new Error("旧图谱未被标记为历史事实");
+  }
+  const oldHarvestOffset = oldComparison.stage_offsets.find(
+    (item) => item.stage === "harvest",
+  ).offset_days;
+  if (oldHarvestOffset !== 5) {
+    throw new Error("冻结图谱的偏移被悄悄改写");
+  }
+  const naive = await apiRaw("/comparisons", "PUT", {
+    title: "尝试悄悄重算",
+    left_observation_id: first.id,
+    right_observation_id: second.id,
+  });
+  if (naive.status !== 409 || naive.payload.error.code !== "comparison_basis_superseded") {
+    throw new Error("系统未阻止基于旧世代的隐式重算");
+  }
+
+  await page.locator('[data-check="nav-comparison"]').click();
+  await page.locator('[data-check="comparison-index-historical"]').first().waitFor();
+  await page
+    .locator('[data-check="comparison-superseded-banner"]')
+    .waitFor();
+
+  // 编排器中直接生成：第一次必须被拦截，提示旧图谱冻结
+  await page.locator('[data-check="create-comparison"]').click();
+  await page.getByText("不能悄悄重算").waitFor();
+  await page.locator('[data-check="supersede-notice"]').waitFor();
+
+  // 显式确认后才生成接续新版图谱
+  await page.locator('[data-check="create-comparison"]').click();
+  await page.getByText("新版对比图谱已生成，旧图谱保留为历史事实").waitFor();
+  const renewedOffsetRows = page.locator('[data-check="offset-row"]');
+  if ((await renewedOffsetRows.count()) !== 4) {
+    throw new Error("新版图谱阶段数不完整");
+  }
+  const comparisonsAfter = await api("/comparisons");
+  const currentOnes = comparisonsAfter.items.filter(
+    (item) => item.basis_status === "current",
+  );
+  if (currentOnes.length !== 1) {
+    throw new Error("存在两套同时有效的当前图谱");
+  }
+  if (
+    currentOnes[0].stage_offsets.find((item) => item.stage === "harvest")
+      .offset_days !== 2
+  ) {
+    throw new Error("新版图谱未采用勘误后的当前事实");
+  }
+
+  // 简报入口：旧简报保持冻结且被标注，新简报采用当前事实
+  await page.locator('[data-check="nav-brief"]').click();
+  await page.locator('[data-check="brief-plot"]').click();
+  await page.locator('[data-choice-value]:has-text("OR-2402")').click();
+  await page.locator('[data-check="brief-library-historical"]').first().waitFor();
+  await page.locator('[data-check="brief-library-historical"]').first().click();
+  const oldBriefBanner = page.locator('[data-check="brief-superseded-banner"]');
+  await oldBriefBanner.waitFor();
+  const oldBriefs = await api("/briefs");
+  const historicalBrief = oldBriefs.items.find(
+    (item) => item.basis_status === "superseded",
+  );
+  if (!historicalBrief) {
+    throw new Error("旧简报未被标记为历史快照");
+  }
+  const oldBriefDetail = await api(`/briefs/${historicalBrief.id}`);
+  const oldBriefSeason = oldBriefDetail.payload.observations.find(
+    (item) => item.id === first.id,
+  );
+  if (oldBriefSeason.entry_map.harvest.observed_on !== "2026-09-02") {
+    throw new Error("冻结简报内容被改写");
+  }
+
+  await page.locator('[data-check="create-brief"]').click();
+  await page.getByText("编研简报已生成并冻结").waitFor();
+  const newBriefBasis = page.locator('[data-check="brief-basis"]');
+  await newBriefBasis.waitFor();
+  const basisText = await newBriefBasis.innerText();
+  if (!basisText.includes("与当前勘误链一致")) {
+    throw new Error("新简报未声明当前事实口径");
+  }
+  const briefsAfter = await api("/briefs");
+  const currentBrief = briefsAfter.items.find(
+    (item) => item.basis_status === "current",
+  );
+  const newBriefDetail = await api(`/briefs/${currentBrief.id}`);
+  const newBriefSeason = newBriefDetail.payload.observations.find(
+    (item) => item.id === first.id,
+  );
+  if (newBriefSeason.entry_map.harvest.observed_on !== "2026-09-05") {
+    throw new Error("新简报未采用勘误后的当前事实");
+  }
+}
+
 async function seedCatalog(code, name, cultivar) {
   const plot = await api("/plots", "PUT", {
     code,
@@ -298,6 +490,23 @@ async function api(path, method = "GET", body) {
     );
   }
   return payload;
+}
+
+async function apiRaw(path, method = "GET", body) {
+  const mutation = method !== "GET";
+  const response = await fetch(`${API_ORIGIN}/api${path}`, {
+    method,
+    headers: {
+      "X-Actor-Id": "local-admin",
+      ...(mutation
+        ? { "X-Idempotency-Key": `check-${crypto.randomUUID()}` }
+        : {}),
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const payload = await response.json();
+  return { status: response.status, payload };
 }
 
 function startProcess(command, args) {

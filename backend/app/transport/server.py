@@ -14,6 +14,7 @@ from ..application import (
     BriefService,
     CatalogService,
     ComparisonService,
+    CorrectionService,
     ObservationService,
 )
 from ..config import RuntimeConfig
@@ -223,6 +224,7 @@ def create_server(
     observations = ObservationService(repository)
     comparisons = ComparisonService(repository)
     briefs = BriefService(repository)
+    corrections = CorrectionService(repository)
     jobs = JobService(repository.database)
     identity = IdentityService(repository.database)
     handlers = ApiHandlers(
@@ -230,6 +232,7 @@ def create_server(
         observations,
         comparisons,
         briefs,
+        corrections,
         repository,
         jobs,
         identity,
@@ -259,6 +262,7 @@ def _resource_id(
         "tree_id",
         "observation_id",
         "comparison_id",
+        "correction_id",
         "brief_id",
         "job_id",
     ):

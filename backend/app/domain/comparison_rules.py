@@ -7,8 +7,22 @@ from statistics import mean
 from typing import Any
 
 from ..errors import PreconditionError, ValidationError
+from .correction_rules import current_correction_id, effective_entries
 from .plot_rules import new_identifier, now_iso
 from .stages import STAGE_BY_KEY, sort_stage_entries
+
+
+def observation_basis(
+    observation: dict[str, Any],
+    corrections: dict[str, dict[str, Any]],
+) -> dict[str, str | None]:
+    return {
+        "observation_id": observation["id"],
+        "current_correction_id": current_correction_id(
+            corrections,
+            observation["id"],
+        ),
+    }
 
 
 def create_comparison_record(
@@ -17,11 +31,17 @@ def create_comparison_record(
     right: dict[str, Any],
     left_tree: dict[str, Any] | None,
     right_tree: dict[str, Any] | None,
+    corrections: dict[str, dict[str, Any]],
     timestamp: str,
 ) -> dict[str, Any]:
     left_id = str(payload.get("left_observation_id") or "").strip()
     right_id = str(payload.get("right_observation_id") or "").strip()
     title = str(payload.get("title") or "").strip()
+    supersedes_id = (
+        str(payload["supersedes_comparison_id"]).strip()
+        if payload.get("supersedes_comparison_id")
+        else None
+    )
     if not title:
         raise ValidationError("请填写对比图谱标题", field_name="title")
     if len(title) > 100:
@@ -29,13 +49,22 @@ def create_comparison_record(
     if left_id == right_id:
         raise ValidationError("请选择两份不同的季节志", field_name="right_observation_id")
     ensure_comparable(left, right)
-    offsets = calculate_stage_offsets(left, right)
+    left_entries = effective_entries(left, corrections)
+    right_entries = effective_entries(right, corrections)
+    offsets = calculate_stage_offsets(left_entries, right_entries)
     if not offsets:
         raise PreconditionError(
             "no_common_stage",
             "两份季节志没有可比较的共同阶段",
         )
-    summary = build_summary(title, left, right, left_tree, right_tree, offsets)
+    summary = build_summary(
+        title,
+        left,
+        right,
+        left_tree,
+        right_tree,
+        offsets,
+    )
     return {
         "id": new_identifier("atlas"),
         "schema_version": 1,
@@ -49,6 +78,10 @@ def create_comparison_record(
         "right_label": label_for(right_tree),
         "stage_offsets": offsets,
         "summary": summary,
+        "left_basis": observation_basis(left, corrections),
+        "right_basis": observation_basis(right, corrections),
+        "supersedes_comparison_id": supersedes_id,
+        "lineage_root_id": supersedes_id or None,
         "created_at": timestamp,
     }
 
@@ -68,21 +101,21 @@ def ensure_comparable(left: dict[str, Any], right: dict[str, Any]) -> None:
 
 
 def calculate_stage_offsets(
-    left: dict[str, Any],
-    right: dict[str, Any],
+    left_entries: list[dict[str, Any]],
+    right_entries: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    left_entries = {
-        item["stage"]: item for item in sort_stage_entries(left.get("entries", []))
+    left_map = {
+        item["stage"]: item for item in sort_stage_entries(left_entries)
     }
-    right_entries = {
-        item["stage"]: item for item in sort_stage_entries(right.get("entries", []))
+    right_map = {
+        item["stage"]: item for item in sort_stage_entries(right_entries)
     }
-    common = set(left_entries) & set(right_entries)
+    common = set(left_map) & set(right_map)
     ordered_common = sorted(common, key=lambda key: STAGE_BY_KEY[key].rank)
     result: list[dict[str, Any]] = []
     for key in ordered_common:
-        left_entry = left_entries[key]
-        right_entry = right_entries[key]
+        left_entry = left_map[key]
+        right_entry = right_map[key]
         left_date = date.fromisoformat(left_entry["observed_on"])
         right_date = date.fromisoformat(right_entry["observed_on"])
         offset = (right_date - left_date).days
@@ -157,7 +190,64 @@ def right_tree_label(tree: dict[str, Any] | None) -> str:
     return label_for(tree)
 
 
-def comparison_summary(record: dict[str, Any]) -> dict[str, Any]:
+def _basis_matches(record: dict[str, Any], side: str, correction_id: str | None) -> bool:
+    basis = record.get(f"{side}_basis")
+    if basis is None:
+        # 旧记录：勘误功能上线前生成，天然对应第零代冻结事实。
+        return correction_id is None
+    return basis.get("current_correction_id") == correction_id
+
+
+def same_basis(
+    record: dict[str, Any],
+    left_correction_id: str | None,
+    right_correction_id: str | None,
+) -> bool:
+    return (
+        _basis_matches(record, "left", left_correction_id)
+        and _basis_matches(record, "right", right_correction_id)
+    )
+
+
+def lineage_root(
+    comparisons: dict[str, dict[str, Any]],
+    record: dict[str, Any],
+) -> str:
+    root = record.get("lineage_root_id")
+    seen = {record["id"]}
+    while root and root not in seen and root in comparisons:
+        seen.add(root)
+        record = comparisons[root]
+        root = record.get("lineage_root_id")
+    return record["id"] if root is None else root
+
+
+def comparison_basis_status(
+    record: dict[str, Any],
+    corrections: dict[str, dict[str, Any]],
+) -> str:
+    left_current = current_correction_id(
+        corrections,
+        record["left_observation_id"],
+    )
+    right_current = current_correction_id(
+        corrections,
+        record["right_observation_id"],
+    )
+    return (
+        "current"
+        if same_basis(record, left_current, right_current)
+        else "superseded"
+    )
+
+
+def comparison_summary(
+    record: dict[str, Any],
+    *,
+    corrections: dict[str, dict[str, Any]] | None = None,
+    superseded_by_id: str | None = None,
+) -> dict[str, Any]:
+    ledger = corrections or {}
     return {
         "id": record["id"],
         "title": record["title"],
@@ -168,5 +258,10 @@ def comparison_summary(record: dict[str, Any]) -> dict[str, Any]:
         "right_label": record["right_label"],
         "stage_offsets": record["stage_offsets"],
         "summary": record["summary"],
+        "left_basis": record.get("left_basis"),
+        "right_basis": record.get("right_basis"),
+        "supersedes_comparison_id": record.get("supersedes_comparison_id"),
+        "superseded_by_id": superseded_by_id,
+        "basis_status": comparison_basis_status(record, ledger),
         "created_at": record["created_at"],
     }

@@ -8,6 +8,7 @@ from ..application import (
     BriefService,
     CatalogService,
     ComparisonService,
+    CorrectionService,
     ObservationService,
 )
 from ..domain.stages import STAGES
@@ -25,6 +26,7 @@ class ApiHandlers:
         observations: ObservationService,
         comparisons: ComparisonService,
         briefs: BriefService,
+        corrections: CorrectionService,
         repository: Repository,
         jobs: JobService,
         identity: IdentityService,
@@ -33,6 +35,7 @@ class ApiHandlers:
         self.observations = observations
         self.comparisons = comparisons
         self.briefs = briefs
+        self.corrections = corrections
         self.repository = repository
         self.jobs = jobs
         self.identity = identity
@@ -175,6 +178,60 @@ class ApiHandlers:
     ) -> dict[str, Any]:
         return self.observations.complete_observation(
             params["observation_id"],
+            body,
+        )
+
+    def list_corrections(
+        self,
+        *,
+        query: dict[str, list[str]],
+    ) -> dict[str, Any]:
+        return self.corrections.list_corrections(
+            observation_id=_optional_query(query, "observation_id"),
+            tree_id=_optional_query(query, "tree_id"),
+            plot_id=_optional_query(query, "plot_id"),
+            status=_optional_query(query, "status"),
+        )
+
+    def create_correction(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        return self.corrections.create_correction(body)
+
+    def get_correction(self, *, params: dict[str, str]) -> dict[str, Any]:
+        return self.corrections.get_correction(params["correction_id"])
+
+    def adopt_correction(
+        self,
+        *,
+        params: dict[str, str],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        _reject_unknown(body, {"revision"}, "采纳勘误")
+        return self.corrections.adopt_correction(
+            params["correction_id"],
+            body,
+        )
+
+    def reject_correction(
+        self,
+        *,
+        params: dict[str, str],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        _reject_unknown(body, {"revision", "note"}, "拒绝勘误")
+        return self.corrections.reject_correction(
+            params["correction_id"],
+            body,
+        )
+
+    def withdraw_correction(
+        self,
+        *,
+        params: dict[str, str],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        _reject_unknown(body, {"revision"}, "撤回勘误")
+        return self.corrections.withdraw_correction(
+            params["correction_id"],
             body,
         )
 
@@ -475,6 +532,53 @@ def build_router(handlers: ApiHandlers) -> Router:
         capability="observation:write",
         resource_kind="observation",
         resource_id_param="observation_id",
+    )
+
+    router.add(
+        "GET",
+        "/api/corrections",
+        handlers.list_corrections,
+        capability="observation:read",
+        resource_kind="correction",
+    )
+    router.add(
+        "PUT",
+        "/api/corrections",
+        handlers.create_correction,
+        capability="observation:write",
+        resource_kind="correction",
+    )
+    router.add(
+        "GET",
+        "/api/corrections/{correction_id}",
+        handlers.get_correction,
+        capability="observation:read",
+        resource_kind="correction",
+        resource_id_param="correction_id",
+    )
+    router.add(
+        "PUT",
+        "/api/corrections/{correction_id}/adopt",
+        handlers.adopt_correction,
+        capability="observation:write",
+        resource_kind="correction",
+        resource_id_param="correction_id",
+    )
+    router.add(
+        "PUT",
+        "/api/corrections/{correction_id}/reject",
+        handlers.reject_correction,
+        capability="observation:write",
+        resource_kind="correction",
+        resource_id_param="correction_id",
+    )
+    router.add(
+        "PUT",
+        "/api/corrections/{correction_id}/withdraw",
+        handlers.withdraw_correction,
+        capability="observation:write",
+        resource_kind="correction",
+        resource_id_param="correction_id",
     )
 
     router.add(

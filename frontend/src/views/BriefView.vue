@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 import {
+  BookLock,
   BookOpenText,
   Building2,
   Download,
   FileCheck2,
+  GitBranch,
+  History,
   Leaf,
   Trees,
 } from "@lucide/vue";
@@ -12,6 +15,7 @@ import EmptyState from "../components/EmptyState.vue";
 import ChoiceField from "../components/ChoiceField.vue";
 import { formatTimestamp } from "../domain/rules";
 import { stageLabel } from "../domain/stages";
+import { api } from "../services/api";
 import type { BriefSummary } from "../domain/types";
 import { useWorkspace } from "../app/workspace";
 
@@ -21,6 +25,7 @@ const form = reactive({
   title: "",
 });
 const latest = ref<BriefSummary | null>(null);
+const briefLibrary = ref<BriefSummary[]>([]);
 
 const confirmedPlots = computed(() =>
   workspace.state.plots.filter((plot) => plot.status === "confirmed"),
@@ -32,10 +37,18 @@ const plotChoices = computed(() =>
   })),
 );
 
+async function refreshLibrary() {
+  const response = (await api.listBriefs(
+    form.plotId ? { plot_id: form.plotId } : undefined,
+  )) as { items: BriefSummary[] };
+  briefLibrary.value = response.items;
+}
+
 function updateTitle(value?: string | number) {
   if (value !== undefined) form.plotId = String(value);
   const plot = confirmedPlots.value.find((item) => item.id === form.plotId);
   if (plot) form.title = `${plot.code} ${plot.name} 物候档案摘编`;
+  void refreshLibrary();
 }
 
 async function createBrief() {
@@ -44,7 +57,15 @@ async function createBrief() {
     () => workspace.createBrief(form.plotId, form.title),
     "编研简报已生成并冻结",
   );
-  if (result) latest.value = result as BriefSummary;
+  if (result) {
+    latest.value = result as BriefSummary;
+    await refreshLibrary();
+  }
+}
+
+async function openBrief(brief: BriefSummary) {
+  const detail = (await api.getBrief(brief.id)) as BriefSummary;
+  latest.value = detail;
 }
 
 function downloadBrief() {
@@ -58,6 +79,8 @@ function downloadBrief() {
     `重点品种：${payload.plot.cultivar_focus}`,
     `责任人或机构：${payload.plot.steward}`,
     `生成时间：${formatTimestamp(latest.value.created_at)}`,
+    `快照修订：${latest.value.state_revision}`,
+    `事实口径：${latest.value.basis_status === "current" ? "与当前勘误链一致" : "生成时冻结的历史事实"}`,
     "",
     "植株清单",
     ...payload.trees.map(
@@ -65,9 +88,12 @@ function downloadBrief() {
         `- ${tree.code}｜${tree.cultivar}｜砧木 ${tree.rootstock}｜${tree.planting_year} 年`,
     ),
     "",
-    "季节志摘要",
+    "季节志摘要（完成时事实及已采纳勘误，冻结于简报生成时点）",
     ...payload.observations.flatMap((observation) => [
-      `${observation.season} 年 · ${observation.tree_code} · ${observation.cultivar}`,
+      `${observation.season} 年 · ${observation.tree_code} · ${observation.cultivar}` +
+        (observation.has_corrections
+          ? `（含 ${observation.current_correction_seq} 次已采纳勘误）`
+          : ""),
       ...observation.entries.map(
         (entry) =>
           `  ${stageLabel(entry.stage)}：${entry.observed_on}（置信 ${entry.confidence}/5）`,
@@ -84,6 +110,13 @@ function downloadBrief() {
   anchor.click();
   URL.revokeObjectURL(url);
 }
+
+const currentBriefs = computed(() =>
+  briefLibrary.value.filter((brief) => brief.basis_status === "current"),
+);
+const historicalBriefs = computed(() =>
+  briefLibrary.value.filter((brief) => brief.basis_status === "superseded"),
+);
 </script>
 
 <template>
@@ -132,7 +165,42 @@ function downloadBrief() {
           <li>只纳入状态为已完成的季节志，草稿不会进入简报。</li>
           <li>植株清单按编号排序，季节志按年份和编号排序。</li>
           <li>每条物候记录保留观察日期与置信度，不做跨年推断。</li>
+          <li>简报冻结生成时点的勘误世代；之后新采纳的勘误不会改写旧简报，只在其封面上标注“已被超越”。</li>
         </ul>
+      </div>
+
+      <div v-if="briefLibrary.length" class="brief-library" data-check="brief-library">
+        <div v-if="currentBriefs.length" class="brief-library__group">
+          <h4><FileCheck2 :size="14" /> 当前简报</h4>
+          <button
+            v-for="brief in currentBriefs"
+            :key="brief.id"
+            type="button"
+            class="brief-library__item is-current"
+            data-check="brief-library-current"
+            @click="openBrief(brief)"
+          >
+            <strong>{{ brief.title }}</strong>
+            <small>{{ formatTimestamp(brief.created_at) }} · 修订 {{ brief.state_revision }}</small>
+          </button>
+        </div>
+        <div v-if="historicalBriefs.length" class="brief-library__group">
+          <h4><History :size="14" /> 历史简报（季节志已有新勘误）</h4>
+          <button
+            v-for="brief in historicalBriefs"
+            :key="brief.id"
+            type="button"
+            class="brief-library__item is-historical"
+            data-check="brief-library-historical"
+            @click="openBrief(brief)"
+          >
+            <strong>{{ brief.title }}</strong>
+            <small>
+              {{ formatTimestamp(brief.created_at) }} ·
+              {{ brief.superseded_observation_count }} 份季节志已有新结论
+            </small>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -147,7 +215,41 @@ function downloadBrief() {
           生成于 {{ formatTimestamp(latest.created_at) }} · 快照修订
           {{ latest.state_revision }}
         </p>
+        <span
+          class="brief-basis"
+          :class="
+            latest.basis_status === 'current' ? 'is-current' : 'is-historical'
+          "
+          data-check="brief-basis"
+        >
+          <BookLock v-if="latest.basis_status === 'superseded'" :size="14" />
+          <FileCheck2 v-else :size="14" />
+          {{
+            latest.basis_status === "current"
+              ? "事实口径：与当前勘误链一致"
+              : `历史快照：${latest.superseded_observation_count} 份季节志已采用新勘误，本简报内容保持冻结`
+          }}
+        </span>
       </header>
+
+      <div
+        v-if="latest.basis_status === 'superseded'"
+        class="basis-banner basis-banner--historical"
+        data-check="brief-superseded-banner"
+      >
+        <History :size="17" />
+        <div>
+          <strong>这是生成时点的冻结档案，不会被后续勘误改写。</strong>
+          <p>
+            下列季节志在简报生成后有了新结论：
+            {{
+              latest.superseded_observations
+                ?.map((item) => `${item.season} · ${item.tree_code}`)
+                .join("、")
+            }}；需要当前口径时请生成新版简报。
+          </p>
+        </div>
+      </div>
 
       <div class="brief-document__meta">
         <div>
@@ -189,6 +291,14 @@ function downloadBrief() {
           <header>
             <strong>{{ observation.season }} · {{ observation.tree_code }}</strong>
             <span>{{ observation.cultivar }} / 观察者 {{ observation.observer }}</span>
+            <em
+              v-if="observation.has_corrections"
+              class="brief-season__corrected"
+              data-check="brief-season-corrected"
+            >
+              <GitBranch :size="12" />
+              冻结时已含 {{ observation.current_correction_seq }} 次勘误
+            </em>
           </header>
           <div class="brief-season__entries">
             <span v-for="entry in observation.entries" :key="entry.id">

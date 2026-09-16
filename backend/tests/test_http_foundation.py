@@ -109,6 +109,212 @@ class HttpFoundationTests(unittest.TestCase):
         self.assertEqual(job_status, 200)
         self.assertEqual(job["status"], "queued")
 
+    def test_http_controlled_correction_and_basis_flags(self) -> None:
+        headers = {"X-Actor-Id": "local-admin"}
+        plot_status, plot = self._request(
+            "PUT",
+            "/plots",
+            {
+                "code": "OR-8201",
+                "name": "勘误 HTTP 园",
+                "locality": "测试地",
+                "cultivar_focus": "测试品种",
+                "steward": "测试组",
+                "planting_year": 2010,
+                "note": "",
+            },
+            headers,
+        )
+        self.assertEqual(plot_status, 200)
+        _, tree_a = self._request(
+            "PUT",
+            "/trees",
+            {
+                "plot_id": plot["id"],
+                "code": "OR-8201-T01",
+                "cultivar": "秋梨",
+                "rootstock": "杜梨",
+                "planting_year": 2010,
+                "status": "active",
+                "note": "",
+            },
+            headers,
+        )
+        _, tree_b = self._request(
+            "PUT",
+            "/trees",
+            {
+                "plot_id": plot["id"],
+                "code": "OR-8201-T02",
+                "cultivar": "蜜梨",
+                "rootstock": "杜梨",
+                "planting_year": 2010,
+                "status": "active",
+                "note": "",
+            },
+            headers,
+        )
+        self._request(
+            "PUT",
+            f"/plots/{plot['id']}/confirm",
+            {"revision": plot["revision"]},
+            headers,
+        )
+
+        def completed_season(tree: dict[str, object], dates: list[str]) -> dict[str, object]:
+            _, season = self._request(
+                "PUT",
+                "/observations",
+                {
+                    "tree_id": tree["id"],
+                    "season": "2026",
+                    "observer": "HTTP 测试员",
+                    "note": "",
+                },
+                headers,
+            )
+            for stage, observed_on in zip(
+                ["bud_burst", "full_bloom", "fruit_set", "harvest"],
+                dates,
+            ):
+                _, season = self._request(
+                    "PUT",
+                    f"/observations/{season['id']}/stages",
+                    {
+                        "stage": stage,
+                        "observed_on": observed_on,
+                        "confidence": 4,
+                        "note": "",
+                        "revision": season["revision"],
+                    },
+                    headers,
+                )
+            _, season = self._request(
+                "PUT",
+                f"/observations/{season['id']}/complete",
+                {"revision": season["revision"]},
+                headers,
+            )
+            return season
+
+        first = completed_season(
+            tree_a,
+            ["2026-03-10", "2026-04-01", "2026-04-18", "2026-09-02"],
+        )
+        second = completed_season(
+            tree_b,
+            ["2026-03-15", "2026-04-05", "2026-04-22", "2026-09-07"],
+        )
+
+        _, comparison = self._request(
+            "PUT",
+            "/comparisons",
+            {
+                "title": "HTTP 图谱",
+                "left_observation_id": first["id"],
+                "right_observation_id": second["id"],
+            },
+            headers,
+        )
+        _, brief = self._request(
+            "PUT",
+            f"/plots/{plot['id']}/briefs",
+            {"title": "HTTP 简报"},
+            headers,
+        )
+
+        propose_status, proposed = self._request(
+            "PUT",
+            "/corrections",
+            {
+                "observation_id": first["id"],
+                "reason": "HTTP 台账复核后采收期顺延",
+                "changes": [{"stage": "harvest", "observed_on": "2026-09-05"}],
+            },
+            headers,
+        )
+        self.assertEqual(propose_status, 200)
+        self.assertEqual(proposed["status"], "proposed")
+
+        list_status, listing = self._request(
+            "GET",
+            f"/corrections?observation_id={first['id']}",
+            None,
+            headers,
+        )
+        self.assertEqual(list_status, 200)
+        self.assertEqual(listing["total"], 1)
+
+        adopt_status, adopted = self._request(
+            "PUT",
+            f"/corrections/{proposed['id']}/adopt",
+            {"revision": proposed["revision"]},
+            headers,
+        )
+        self.assertEqual(adopt_status, 200)
+        self.assertEqual(adopted["status"], "adopted")
+
+        _, observation = self._request(
+            "GET",
+            f"/observations/{first['id']}",
+            None,
+            headers,
+        )
+        self.assertEqual(
+            observation["entry_map"]["harvest"]["observed_on"],
+            "2026-09-05",
+        )
+        self.assertEqual(
+            next(
+                item
+                for item in observation["frozen_entries"]
+                if item["stage"] == "harvest"
+            )["observed_on"],
+            "2026-09-02",
+        )
+
+        conflict_status, conflict = self._request(
+            "PUT",
+            "/comparisons",
+            {
+                "title": "隐式重算",
+                "left_observation_id": first["id"],
+                "right_observation_id": second["id"],
+            },
+            headers,
+        )
+        self.assertEqual(conflict_status, 409)
+        self.assertEqual(conflict["error"]["code"], "comparison_basis_superseded")
+
+        _, old_comparison = self._request(
+            "GET",
+            f"/comparisons/{comparison['id']}",
+            None,
+            headers,
+        )
+        self.assertEqual(old_comparison["basis_status"], "superseded")
+
+        _, renewed = self._request(
+            "PUT",
+            "/comparisons",
+            {
+                "title": "HTTP 图谱新版",
+                "left_observation_id": first["id"],
+                "right_observation_id": second["id"],
+                "supersedes_comparison_id": comparison["id"],
+            },
+            headers,
+        )
+        self.assertEqual(renewed["basis_status"], "current")
+
+        _, old_brief = self._request(
+            "GET",
+            f"/briefs/{brief['id']}",
+            None,
+            headers,
+        )
+        self.assertEqual(old_brief["basis_status"], "superseded")
+
     def _request(
         self,
         method: str,

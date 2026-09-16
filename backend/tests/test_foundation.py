@@ -5,8 +5,14 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from app.application import CatalogService
-from app.errors import ConflictError, DomainError
+from app.application import (
+    BriefService,
+    CatalogService,
+    ComparisonService,
+    CorrectionService,
+    ObservationService,
+)
+from app.errors import ConflictError, DomainError, PreconditionError, ValidationError
 from app.jobs import JobService
 from app.persistence import Database, Repository
 from app.security import (
@@ -173,6 +179,523 @@ class RepositoryFoundationTests(unittest.TestCase):
         }
 
 
+class ControlledCorrectionTests(unittest.TestCase):
+    """受控勘误：原始事实、冻结分析与当前结论三层版本关系。"""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self.temporary.name)
+        self.database = Database(self.data_dir / "atlas.sqlite3")
+        self.repository = Repository(self.database)
+        self.repository.open()
+        self.catalog = CatalogService(self.repository)
+        self.observations = ObservationService(self.repository)
+        self.comparisons = ComparisonService(self.repository)
+        self.briefs = BriefService(self.repository)
+        self.corrections = CorrectionService(self.repository)
+        self._seed_plot()
+        self.first = self._complete_season(
+            self.tree_a["id"],
+            ["2026-03-10", "2026-04-01", "2026-04-18", "2026-09-02"],
+        )
+        self.second = self._complete_season(
+            self.tree_b["id"],
+            ["2026-03-15", "2026-04-05", "2026-04-22", "2026-09-07"],
+        )
+
+    def tearDown(self) -> None:
+        self.repository.close()
+        self.temporary.cleanup()
+
+    def _seed_plot(self) -> None:
+        with _request("local-admin", "corr-plot-create"):
+            self.plot = self.catalog.create_plot(
+                {
+                    "code": "OR-6201",
+                    "name": "勘误测试园",
+                    "locality": "测试地点",
+                    "cultivar_focus": "测试品种",
+                    "steward": "测试组",
+                    "planting_year": 2010,
+                    "note": "",
+                }
+            )
+        with _request("local-admin", "corr-tree-a"):
+            self.tree_a = self.catalog.create_tree(
+                {
+                    "plot_id": self.plot["id"],
+                    "code": "OR-6201-T01",
+                    "cultivar": "秋梨",
+                    "rootstock": "杜梨",
+                    "planting_year": 2010,
+                    "status": "active",
+                    "note": "",
+                }
+            )
+        with _request("local-admin", "corr-tree-b"):
+            self.tree_b = self.catalog.create_tree(
+                {
+                    "plot_id": self.plot["id"],
+                    "code": "OR-6201-T02",
+                    "cultivar": "蜜梨",
+                    "rootstock": "杜梨",
+                    "planting_year": 2010,
+                    "status": "active",
+                    "note": "",
+                }
+            )
+        with _request("local-admin", "corr-plot-confirm"):
+            self.catalog.confirm_plot(
+                self.plot["id"],
+                expected_revision=self.plot["revision"],
+            )
+
+    def _complete_season(
+        self,
+        tree_id: str,
+        dates: list[str],
+    ) -> dict[str, object]:
+        stages = ["bud_burst", "full_bloom", "fruit_set", "harvest"]
+        with _request("local-admin", f"start-{tree_id[-3:]}"):
+            record = self.observations.start_observation(
+                {
+                    "tree_id": tree_id,
+                    "season": "2026",
+                    "observer": "勘误测试员",
+                    "note": "",
+                }
+            )
+        for index, (stage, observed_on) in enumerate(zip(stages, dates)):
+            with _request("local-admin", f"stage-{tree_id[-3:]}-{index}"):
+                record = self.observations.add_stage(
+                    record["id"],
+                    {
+                        "stage": stage,
+                        "observed_on": observed_on,
+                        "confidence": 4,
+                        "note": "",
+                        "revision": record["revision"],
+                    },
+                )
+        with _request("local-admin", f"complete-{tree_id[-3:]}"):
+            return self.observations.complete_observation(
+                record["id"],
+                {"revision": record["revision"]},
+            )
+
+    def _frozen_comparison(self) -> dict[str, object]:
+        with _request("local-admin", "corr-cmp-1"):
+            return self.comparisons.create_comparison(
+                {
+                    "title": "勘误前图谱",
+                    "left_observation_id": self.first["id"],
+                    "right_observation_id": self.second["id"],
+                }
+            )
+
+    def test_proposal_keeps_current_fact_and_correction_only_changes_fact_after_adoption(
+        self,
+    ) -> None:
+        with _request("local-admin", "corr-propose"):
+            proposed = self.corrections.create_correction(
+                {
+                    "observation_id": self.first["id"],
+                    "reason": "原始台账显示采收日期应为九月五日",
+                    "changes": [{"stage": "harvest", "observed_on": "2026-09-05"}],
+                }
+            )
+        self.assertEqual(proposed["status"], "proposed")
+        pending = self.observations.get_observation(self.first["id"])
+        self.assertEqual(pending["entry_map"]["harvest"]["observed_on"], "2026-09-02")
+        self.assertEqual(pending["proposed_correction_count"], 1)
+        self.assertIsNone(pending["current_correction_id"])
+
+        with _request("local-admin", "corr-adopt"):
+            adopted = self.corrections.adopt_correction(
+                proposed["id"],
+                {"revision": proposed["revision"]},
+            )
+        self.assertEqual(adopted["status"], "adopted")
+        detail = self.observations.get_observation(self.first["id"])
+        self.assertEqual(detail["entry_map"]["harvest"]["observed_on"], "2026-09-05")
+        self.assertEqual(detail["current_correction_id"], proposed["id"])
+        self.assertEqual(detail["current_correction_seq"], 1)
+        frozen_harvest = next(
+            item for item in detail["frozen_entries"] if item["stage"] == "harvest"
+        )
+        self.assertEqual(frozen_harvest["observed_on"], "2026-09-02")
+        lineage = next(
+            item for item in detail["entry_lineage"] if item["stage"] == "harvest"
+        )
+        self.assertTrue(lineage["revised"])
+        self.assertEqual(lineage["frozen"]["observed_on"], "2026-09-02")
+        self.assertEqual(lineage["current"]["observed_on"], "2026-09-05")
+
+        # 季节志本体字节与修订号永不被勘误改写。
+        raw = self.repository.read()["observations"][self.first["id"]]
+        raw_harvest = next(
+            item for item in raw["entries"] if item["stage"] == "harvest"
+        )
+        self.assertEqual(raw_harvest["observed_on"], "2026-09-02")
+        self.assertEqual(raw["revision"], self.first["revision"])
+
+    def test_correction_is_validated_against_completed_record(self) -> None:
+        with _request("local-admin", "corr-open-stage"):
+            draft = self.observations.start_observation(
+                {
+                    "tree_id": self.tree_a["id"],
+                    "season": "2025",
+                    "observer": "草稿员",
+                    "note": "",
+                }
+            )
+        with self.assertRaises(PreconditionError) as raised:
+            with _request("local-admin", "corr-on-open"):
+                self.corrections.create_correction(
+                    {
+                        "observation_id": draft["id"],
+                        "reason": "草稿不能提出勘误",
+                        "changes": [{"stage": "harvest", "observed_on": "2025-09-05"}],
+                    }
+                )
+        self.assertEqual(raised.exception.code, "season_not_completed")
+
+        with self.assertRaises(PreconditionError) as stage_raised:
+            with _request("local-admin", "corr-bad-stage"):
+                self.corrections.create_correction(
+                    {
+                        "observation_id": self.first["id"],
+                        "reason": "不能修正没有冻结过的落叶期",
+                        "changes": [{"stage": "leaf_fall", "observed_on": "2026-11-20"}],
+                    }
+                )
+        self.assertEqual(
+            stage_raised.exception.code,
+            "correction_stage_not_recorded",
+        )
+        with self.assertRaises(ValidationError):
+            with _request("local-admin", "corr-sequence"):
+                self.corrections.create_correction(
+                    {
+                        "observation_id": self.first["id"],
+                        "reason": "萌芽期不能晚于盛花期",
+                        "changes": [{"stage": "bud_burst", "observed_on": "2026-05-01"}],
+                    }
+                )
+        with self.assertRaises(ValidationError):
+            with _request("local-admin", "corr-same"):
+                self.corrections.create_correction(
+                    {
+                        "observation_id": self.first["id"],
+                        "reason": "与冻结事实相同不算勘误",
+                        "changes": [{"stage": "harvest", "observed_on": "2026-09-02"}],
+                    }
+                )
+
+    def test_rejected_and_withdrawn_corrections_never_change_facts(self) -> None:
+        with _request("local-admin", "corr-reject-create"):
+            candidate = self.corrections.create_correction(
+                {
+                    "observation_id": self.first["id"],
+                    "reason": "待拒绝的错误勘误建议",
+                    "changes": [{"stage": "harvest", "observed_on": "2026-08-30"}],
+                }
+            )
+        with _request("local-admin", "corr-reject"):
+            rejected = self.corrections.reject_correction(
+                candidate["id"],
+                {"revision": candidate["revision"], "note": "台账不支持该日期"},
+            )
+        self.assertEqual(rejected["status"], "rejected")
+
+        with _request("local-admin", "corr-withdraw-create"):
+            other = self.corrections.create_correction(
+                {
+                    "observation_id": self.first["id"],
+                    "reason": "待撤回的勘误建议",
+                    "changes": [{"stage": "harvest", "observed_on": "2026-08-31"}],
+                }
+            )
+        with _request("local-admin", "corr-withdraw"):
+            withdrawn = self.corrections.withdraw_correction(
+                other["id"],
+                {"revision": other["revision"]},
+            )
+        self.assertEqual(withdrawn["status"], "withdrawn")
+        detail = self.observations.get_observation(self.first["id"])
+        self.assertEqual(detail["entry_map"]["harvest"]["observed_on"], "2026-09-02")
+        self.assertFalse(detail["has_corrections"])
+        self.assertIsNone(detail["current_correction_id"])
+
+        with self.assertRaises(PreconditionError):
+            with _request("local-admin", "corr-double-decide"):
+                self.corrections.adopt_correction(
+                    rejected["id"],
+                    {"revision": rejected["revision"]},
+                )
+
+    def test_frozen_comparison_is_not_rewritten_and_requires_explicit_new_version(
+        self,
+    ) -> None:
+        original = self._frozen_comparison()
+        original_offsets = [
+            dict(item) for item in original["stage_offsets"]
+        ]
+        with _request("local-admin", "corr-for-cmp-create"):
+            proposal = self.corrections.create_correction(
+                {
+                    "observation_id": self.first["id"],
+                    "reason": "复核后采收期顺延三天",
+                    "changes": [{"stage": "harvest", "observed_on": "2026-09-05"}],
+                }
+            )
+        with _request("local-admin", "corr-for-cmp-adopt"):
+            self.corrections.adopt_correction(
+                proposal["id"],
+                {"revision": proposal["revision"]},
+            )
+
+        frozen = self.comparisons.get_comparison(original["id"])
+        self.assertEqual(frozen["basis_status"], "superseded")
+        self.assertEqual(
+            [item["offset_days"] for item in frozen["stage_offsets"]],
+            [item["offset_days"] for item in original_offsets],
+        )
+
+        with self.assertRaises(ConflictError) as raised:
+            with _request("local-admin", "corr-cmp-naive"):
+                self.comparisons.create_comparison(
+                    {
+                        "title": "悄悄重算",
+                        "left_observation_id": self.first["id"],
+                        "right_observation_id": self.second["id"],
+                    }
+                )
+        self.assertEqual(
+            raised.exception.code,
+            "comparison_basis_superseded",
+        )
+        self.assertEqual(
+            raised.exception.details["existing_comparison_id"],
+            original["id"],
+        )
+
+        with _request("local-admin", "corr-cmp-new"):
+            renewed = self.comparisons.create_comparison(
+                {
+                    "title": "勘误后图谱",
+                    "left_observation_id": self.first["id"],
+                    "right_observation_id": self.second["id"],
+                    "supersedes_comparison_id": original["id"],
+                }
+            )
+        self.assertEqual(renewed["basis_status"], "current")
+        self.assertEqual(renewed["supersedes_comparison_id"], original["id"])
+        renewed_harvest = next(
+            item for item in renewed["stage_offsets"] if item["stage"] == "harvest"
+        )
+        self.assertEqual(renewed_harvest["offset_days"], 2)
+        self.assertEqual(
+            renewed["left_basis"]["current_correction_id"],
+            proposal["id"],
+        )
+
+        old = self.comparisons.get_comparison(original["id"])
+        new = self.comparisons.get_comparison(renewed["id"])
+        self.assertEqual(old["basis_status"], "superseded")
+        self.assertEqual(old["superseded_by_id"], renewed["id"])
+        self.assertEqual(new["basis_status"], "current")
+
+        # 同世代重复请求复用同一版本，不会产生两套“当前”图谱。
+        with _request("local-admin", "corr-cmp-duplicate"):
+            duplicate = self.comparisons.create_comparison(
+                {
+                    "title": "勘误后图谱",
+                    "left_observation_id": self.first["id"],
+                    "right_observation_id": self.second["id"],
+                }
+            )
+        self.assertEqual(duplicate["id"], renewed["id"])
+        listing = self.comparisons.list_comparisons()
+        current = [
+            item for item in listing["items"] if item["basis_status"] == "current"
+        ]
+        self.assertEqual(len(current), 1)
+
+    def test_second_correction_forms_chain_and_stale_proposal_is_revalidated(
+        self,
+    ) -> None:
+        # X 在冻结事实上成立：采收期可前移到 06-01。
+        with _request("local-admin", "corr-chain-x-create"):
+            stale = self.corrections.create_correction(
+                {
+                    "observation_id": self.first["id"],
+                    "reason": "采收日期拟前移到六月",
+                    "changes": [{"stage": "harvest", "observed_on": "2026-06-01"}],
+                }
+            )
+
+        # Y 先把坐果期核定为 08-20，采纳后 X 与新事实冲突。
+        with _request("local-admin", "corr-chain-y-create"):
+            intervening = self.corrections.create_correction(
+                {
+                    "observation_id": self.first["id"],
+                    "reason": "坐果期实际为八月下旬",
+                    "changes": [{"stage": "fruit_set", "observed_on": "2026-08-20"}],
+                }
+            )
+        with _request("local-admin", "corr-chain-y-adopt"):
+            self.corrections.adopt_correction(
+                intervening["id"],
+                {"revision": intervening["revision"]},
+            )
+
+        # 采纳点必须基于最新事实重新校验，系统拒绝且不套用 X。
+        with self.assertRaises(ValidationError):
+            with _request("local-admin", "corr-chain-x-adopt"):
+                self.corrections.adopt_correction(
+                    stale["id"],
+                    {"revision": stale["revision"]},
+                )
+        pending = self.corrections.get_correction(stale["id"])
+        self.assertEqual(pending["status"], "proposed")
+        self.assertEqual(
+            self.observations.get_observation(self.first["id"])["entry_map"]["harvest"][
+                "observed_on"
+            ],
+            "2026-09-02",
+        )
+
+        with _request("local-admin", "corr-chain-z-create"):
+            valid = self.corrections.create_correction(
+                {
+                    "observation_id": self.first["id"],
+                    "reason": "采收日期二次核定",
+                    "changes": [{"stage": "harvest", "observed_on": "2026-09-08"}],
+                }
+            )
+        with _request("local-admin", "corr-chain-z-adopt"):
+            self.corrections.adopt_correction(
+                valid["id"],
+                {"revision": valid["revision"]},
+            )
+        detail = self.observations.get_observation(self.first["id"])
+        self.assertEqual(detail["current_correction_id"], valid["id"])
+        self.assertEqual(detail["current_correction_seq"], 2)
+        self.assertEqual(detail["entry_map"]["harvest"]["observed_on"], "2026-09-08")
+        self.assertEqual(
+            detail["entry_map"]["fruit_set"]["observed_on"],
+            "2026-08-20",
+        )
+        ledger = self.corrections.list_corrections(
+            observation_id=self.first["id"],
+            status="adopted",
+        )
+        self.assertEqual(ledger["total"], 2)
+
+    def test_brief_freezes_basis_and_is_flagged_after_later_correction(self) -> None:
+        with _request("local-admin", "corr-brief-1"):
+            first_brief = self.briefs.create_brief(
+                self.plot["id"],
+                {"title": "勘误前简报"},
+            )
+        self.assertEqual(first_brief["basis_status"], "current")
+        with _request("local-admin", "corr-brief-adopt-create"):
+            proposal = self.corrections.create_correction(
+                {
+                    "observation_id": self.first["id"],
+                    "reason": "简报后核定采收日期",
+                    "changes": [{"stage": "harvest", "observed_on": "2026-09-05"}],
+                }
+            )
+        with _request("local-admin", "corr-brief-adopt"):
+            self.corrections.adopt_correction(
+                proposal["id"],
+                {"revision": proposal["revision"]},
+            )
+
+        frozen_brief = self.briefs.get_brief(first_brief["id"])
+        self.assertEqual(frozen_brief["basis_status"], "superseded")
+        frozen_season = next(
+            item
+            for item in frozen_brief["payload"]["observations"]
+            if item["id"] == self.first["id"]
+        )
+        self.assertEqual(
+            frozen_season["entry_map"]["harvest"]["observed_on"],
+            "2026-09-02",
+        )
+        self.assertEqual(
+            frozen_brief["superseded_observations"][0]["current_correction_id"],
+            proposal["id"],
+        )
+
+        with _request("local-admin", "corr-brief-2"):
+            current_brief = self.briefs.create_brief(
+                self.plot["id"],
+                {"title": "勘误后简报"},
+            )
+        self.assertEqual(current_brief["basis_status"], "current")
+        current_season = next(
+            item
+            for item in current_brief["payload"]["observations"]
+            if item["id"] == self.first["id"]
+        )
+        self.assertEqual(
+            current_season["entry_map"]["harvest"]["observed_on"],
+            "2026-09-05",
+        )
+
+    def test_correction_versions_and_audit_share_transaction(self) -> None:
+        with _request(
+            "local-admin",
+            "corr-version-create",
+            request_path="/api/corrections",
+            route_template="/api/corrections",
+        ):
+            created = self.corrections.create_correction(
+                {
+                    "observation_id": self.first["id"],
+                    "reason": "审计所需的勘误记录",
+                    "changes": [{"stage": "harvest", "observed_on": "2026-09-05"}],
+                }
+            )
+        with _request(
+            "local-admin",
+            "corr-version-adopt",
+            request_path=f"/api/corrections/{created['id']}/adopt",
+            route_template="/api/corrections/{correction_id}/adopt",
+        ):
+            self.corrections.adopt_correction(
+                created["id"],
+                {"revision": created["revision"]},
+            )
+        versions = self.repository.list_entity_versions(
+            kind="correction",
+            identifier=created["id"],
+        )
+        self.assertEqual([item["revision"] for item in versions["items"]], [2, 1])
+        actions = {
+            item["action"]
+            for item in self.repository.list_audit_events(
+                resource_kind="correction",
+                resource_id=created["id"],
+            )["items"]
+        }
+        self.assertIn("adopt", actions)
+
+    def _plot_payload(self, code: str) -> dict[str, object]:
+        return {
+            "code": code,
+            "name": f"测试园区 {code}",
+            "locality": "测试地点",
+            "cultivar_focus": "测试品种",
+            "steward": "测试组",
+            "planting_year": 2010,
+            "note": "",
+        }
+
+
 class JobQueueTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -232,15 +755,17 @@ def _request(
     idempotency_key: str,
     *,
     request_hash: str | None = None,
+    request_path: str = "/api/test",
+    route_template: str = "/api/test",
 ):
     return request_scope(
         RequestContext(
             actor_id=actor_id,
             idempotency_key=idempotency_key,
             request_method="PUT",
-            request_path="/api/test",
+            request_path=request_path,
             request_hash=request_hash or f"{actor_id}:{idempotency_key}",
-            route_template="/api/test",
+            route_template=route_template,
         )
     )
 

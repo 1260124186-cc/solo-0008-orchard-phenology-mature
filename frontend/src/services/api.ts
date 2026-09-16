@@ -128,6 +128,25 @@ export const api = {
       method: "PUT",
       ...jsonBody({ revision }),
     }),
+  listCorrections: (query?: Record<string, QueryValue>) =>
+    request(`/corrections${encodeQuery(query)}`),
+  createCorrection: (body: unknown) =>
+    request("/corrections", { method: "PUT", ...jsonBody(body) }),
+  adoptCorrection: (id: string, revision: number) =>
+    request(`/corrections/${encodeURIComponent(id)}/adopt`, {
+      method: "PUT",
+      ...jsonBody({ revision }),
+    }),
+  rejectCorrection: (id: string, revision: number, note: string) =>
+    request(`/corrections/${encodeURIComponent(id)}/reject`, {
+      method: "PUT",
+      ...jsonBody({ revision, note }),
+    }),
+  withdrawCorrection: (id: string, revision: number) =>
+    request(`/corrections/${encodeURIComponent(id)}/withdraw`, {
+      method: "PUT",
+      ...jsonBody({ revision }),
+    }),
   listComparisons: () => request("/comparisons"),
   createComparison: (body: unknown) =>
     request("/comparisons", { method: "PUT", ...jsonBody(body) }),

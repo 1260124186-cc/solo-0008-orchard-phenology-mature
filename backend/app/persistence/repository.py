@@ -26,6 +26,7 @@ ENTITY_KINDS: dict[str, str] = {
     "observations": "observation",
     "comparisons": "comparison",
     "briefs": "brief",
+    "corrections": "correction",
 }
 
 
@@ -108,6 +109,7 @@ class Repository:
                 "observation_count": _count(connection, "observation"),
                 "comparison_count": _count(connection, "comparison"),
                 "brief_count": _count(connection, "brief"),
+                "correction_count": _count(connection, "correction"),
                 "event_count": int(
                     connection.execute(
                         "SELECT COUNT(*) AS count FROM audit_events"
@@ -641,6 +643,8 @@ def _canonical(value: Any) -> str:
 
 def _action_name(context: Any) -> str:
     template = str(getattr(context, "route_template", "") or "")
+    path = str(getattr(context, "request_path", "") or "")
+    route = template if "/corrections/" in template or "/api/corrections" in template else path
     method = str(getattr(context, "request_method", "") or "write").lower()
     if template.endswith("/confirm"):
         return "confirm"
@@ -648,6 +652,14 @@ def _action_name(context: Any) -> str:
         return "complete"
     if template.endswith("/close"):
         return "close"
+    if route.endswith("/adopt"):
+        return "adopt"
+    if route.endswith("/reject"):
+        return "reject"
+    if route.endswith("/withdraw"):
+        return "withdraw"
+    if "/corrections" in route and method == "put":
+        return "correction"
     if method == "put":
         return "create"
     if method == "patch":

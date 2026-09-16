@@ -11,8 +11,9 @@
 - 园区档案：建立园区草稿，登记编号、地点、重点品种、责任人和种植年份。
 - 植株编目：按园区维护植株编号、品种、砧木、定植年份和生长状态。
 - 季节物候：按固定阶段顺序记录日期、置信度和说明，完成后冻结。
-- 品种比较：只对两份同年已完成季节志的共同阶段计算日期偏移。
-- 编研简报：冻结已确认园区在生成时点的植株与季节志摘要，并下载文本。
+- 受控勘误：对已完成季节志提出受控更正；采纳后形成勘误链，当前事实更新而原始结论、旧图谱和旧简报永久保留。
+- 品种比较：只对两份同年已完成季节志的共同阶段，按当前生效事实计算日期偏移；旧图谱冻结为历史，只能显式接续新版。
+- 编研简报：冻结已确认园区在生成时点的植株与季节志摘要（含当时勘误世代），并下载文本；后续勘误不改写旧简报。
 
 ## 技术结构
 
@@ -112,10 +113,16 @@ npm run test:backend
 
 测试覆盖数据库迁移、事务写入、并发写入、幂等复用、对象版本、审计、身份作用域、授权撤销和任务生命周期。
 
-一次执行构建、编译、后端测试和三条浏览器工作流：
+一次执行构建、编译、后端测试和四条浏览器工作流：
 
 ```bash
 npm run check
+```
+
+受控勘误的版本关系可以离线自证（原始记录、冻结分析、关闭后重新恢复的数据三层一致）：
+
+```bash
+PYTHONPATH=backend python3 scripts/verify_corrections.py
 ```
 
 需要准备性能或容量场景时，可以生成可重复的规模数据：
@@ -137,11 +144,13 @@ python3 scripts/generate_dataset.py \
 node scripts/workflow_check.mjs --workflow catalog
 node scripts/workflow_check.mjs --workflow observe
 node scripts/workflow_check.mjs --workflow compare
+node scripts/workflow_check.mjs --workflow correction
 ```
 
 - `catalog`：建立园区、加入植株、确认园区并核对服务端状态。
 - `observe`：建立季节志、补录四个必需阶段、完成并核对冻结结果。
 - `compare`：准备两份同年已完成季节志，在页面生成比较并核对四条阶段偏移。
+- `correction`：完成两份季节志、图谱和简报后提出并采纳勘误，核对详情同时呈现冻结事实与当前事实、旧图谱和旧简报保持冻结并标注历史，且不能隐式重算。
 
 检查结束后会关闭服务、浏览器和临时数据目录。
 
@@ -172,7 +181,12 @@ node scripts/workflow_check.mjs --workflow compare
 - `PUT /api/observations/{id}/stages`：补录物候阶段。
 - `DELETE /api/observations/{id}/stages/{stage}`：移除草稿中的阶段。
 - `PUT /api/observations/{id}/complete`：完成并冻结季节志。
-- `GET|PUT /api/comparisons`：查询或生成对比图谱。
+- `GET|PUT /api/corrections`：查询或提出受控勘误。
+- `GET /api/corrections/{id}`：查询单条勘误。
+- `PUT /api/corrections/{id}/adopt`：采纳勘误，使其变更进入当前事实。
+- `PUT /api/corrections/{id}/reject`：拒绝勘误（请求体需包含拒绝理由 `note`）。
+- `PUT /api/corrections/{id}/withdraw`：由操作者撤回待决勘误。
+- `GET|PUT /api/comparisons`：查询或生成对比图谱；源季节志已有新勘误时必须携带 `supersedes_comparison_id` 显式接续历史图谱。
 - `GET /api/briefs` 与 `GET /api/briefs/{brief_id}`：查询编研简报。
 - `PUT /api/plots/{plot_id}/briefs`：生成冻结简报。
 
@@ -182,6 +196,10 @@ node scripts/workflow_check.mjs --workflow compare
 - 同一园区内植株编号唯一；定植年份不能早于园区起始种植年份。
 - 同一植株、同一年份只能建立一份季节志。
 - 完成后季节志不可增删阶段；完成前必须包含萌芽期、盛花期、坐果期和采收期。
+- 完成后的日期或阶段录错只能通过受控勘误修正：勘误只能针对已冻结阶段修改日期、置信度或说明，经采纳后按链顺序叠加为“当前生效事实”；季节志本体字节与修订号永不变更。
+- 待决勘误不影响任何事实；拒绝或撤回的勘误永远不会改变当前事实；采纳时在最新事实上重新校验顺序与日期窗口。
+- 比较始终使用当前生效事实，并冻结生成时两侧季节志的勘误世代；源季节志后续采用勘误时，旧比较标记为历史（`basis_status=superseded`）且内容不变，隐式重算返回 409 `comparison_basis_superseded`，必须携带 `supersedes_comparison_id` 显式接续生成新版，同一世代不会出现两套当前图谱。
+- 简报冻结生成时点的勘误世代；后续勘误只在简报封面上标注其已被超越，不改正文。
 - 比较只使用双方共同阶段，年份不同、状态未完成或无共同阶段时拒绝生成。
 - 业务写入和审计、outbox、对象版本在同一 SQLite 事务中提交。
 - 修改类接口使用对象 `revision` 执行乐观并发控制，旧修订号返回冲突错误。

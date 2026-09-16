@@ -240,11 +240,73 @@ def validate_stage_sequence(entries: list[dict[str, Any]]) -> None:
         previous_label = definition.label
 
 
+def _entry_lineage(
+    frozen_entries: list[dict[str, Any]],
+    effective: list[dict[str, Any]],
+    correction_map: dict[str, str],
+) -> list[dict[str, Any]]:
+    effective_index = {item["stage"]: item for item in effective}
+    lineage: list[dict[str, Any]] = []
+    for frozen in frozen_entries:
+        stage = frozen["stage"]
+        current = effective_index.get(stage, frozen)
+        revised = (
+            current["observed_on"] != frozen["observed_on"]
+            or int(current["confidence"]) != int(frozen["confidence"])
+            or current.get("note", "") != frozen.get("note", "")
+        )
+        lineage.append(
+            {
+                "stage": stage,
+                "frozen": {
+                    "observed_on": frozen["observed_on"],
+                    "confidence": frozen["confidence"],
+                    "note": frozen.get("note", ""),
+                },
+                "current": {
+                    "observed_on": current["observed_on"],
+                    "confidence": current["confidence"],
+                    "note": current.get("note", ""),
+                },
+                "revised": revised,
+                "correction_id": correction_map.get(stage),
+            }
+        )
+    return lineage
+
+
 def observation_summary(
     observation: dict[str, Any],
     tree: dict[str, Any] | None,
+    corrections: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    entries = sort_stage_entries(observation.get("entries", []))
+    from .correction_rules import (
+        adopted_chain,
+        current_correction_id,
+        effective_entries,
+    )
+
+    ledger = corrections or {}
+    frozen = sort_stage_entries(observation.get("entries", []))
+    effective = effective_entries(observation, ledger)
+    chain = adopted_chain(ledger, observation["id"])
+    active_correction_id = current_correction_id(ledger, observation["id"])
+    correction_map: dict[str, str] = {}
+    for correction in chain:
+        for change in correction["changes"]:
+            correction_map[change["stage"]] = correction["id"]
+    proposed = [
+        item
+        for item in ledger.values()
+        if item["observation_id"] == observation["id"]
+        and item["status"] == "proposed"
+    ]
+    resolved = [
+        item
+        for item in ledger.values()
+        if item["observation_id"] == observation["id"]
+        and item["status"] in {"rejected", "withdrawn"}
+    ]
     return {
         "id": observation["id"],
         "tree_id": observation["tree_id"],
@@ -259,16 +321,24 @@ def observation_summary(
         "created_at": observation["created_at"],
         "updated_at": observation["updated_at"],
         "completed_at": observation["completed_at"],
-        "stage_count": len(entries),
+        "stage_count": len(effective),
         "entry_map": {
             item["stage"]: {
                 "observed_on": item["observed_on"],
                 "confidence": item["confidence"],
                 "note": item["note"],
             }
-            for item in entries
+            for item in effective
         },
-        "entries": entries,
+        "entries": effective,
+        "frozen_entries": frozen,
+        "current_entries": effective,
+        "current_correction_id": active_correction_id,
+        "current_correction_seq": len(chain),
+        "has_corrections": bool(chain),
+        "proposed_correction_count": len(proposed),
+        "resolved_correction_count": len(resolved),
+        "entry_lineage": _entry_lineage(frozen, effective, correction_map),
     }
 
 

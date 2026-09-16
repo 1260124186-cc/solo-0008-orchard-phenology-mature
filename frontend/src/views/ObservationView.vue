@@ -5,6 +5,7 @@ import {
   Check,
   CircleDashed,
   Eraser,
+  GitBranch,
   LoaderCircle,
   Plus,
   Sprout,
@@ -13,6 +14,8 @@ import EmptyState from "../components/EmptyState.vue";
 import ChoiceField from "../components/ChoiceField.vue";
 import ObservationStageForm from "../components/ObservationStageForm.vue";
 import StageTrack from "../components/StageTrack.vue";
+import LineageBook from "../components/LineageBook.vue";
+import CorrectionPanel from "../components/CorrectionPanel.vue";
 import { formatTimestamp, missingRequiredStages } from "../domain/rules";
 import { completedProgress, stageLabel } from "../domain/stages";
 import type { ObservationSummary, TreeRecord } from "../domain/types";
@@ -169,7 +172,31 @@ async function completeObservation() {
                 : "记录中"
             }}
           </span>
+          <span
+            v-if="selectedObservation.has_corrections"
+            class="status-stamp is-corrected"
+            data-check="season-corrected"
+          >
+            <GitBranch :size="14" />
+            已采用第 {{ selectedObservation.current_correction_seq }} 次勘误
+          </span>
+          <span
+            v-if="selectedObservation.proposed_correction_count > 0"
+            class="status-stamp is-pending-correction"
+            data-check="season-correction-pending"
+          >
+            {{ selectedObservation.proposed_correction_count }} 条勘误待决
+          </span>
         </header>
+
+        <p
+          v-if="selectedObservation.has_corrections"
+          class="correction-banner"
+          data-check="correction-banner"
+        >
+          本季节志完成时的结论保持封存；下方轨道展示采纳勘误后的当前事实，
+          冻结事实与勘误链见文末对照。
+        </p>
 
         <div class="progress-ribbon">
           <div>
@@ -196,12 +223,33 @@ async function completeObservation() {
             v-for="entry in selectedObservation.entries"
             :key="entry.id"
             class="stage-book__row"
+            :class="{
+              'is-revised-entry': selectedObservation.entry_lineage?.find(
+                (line) => line.stage === entry.stage,
+              )?.revised,
+            }"
             data-check="stage-entry"
           >
             <span class="stage-book__stage">{{ stageLabel(entry.stage) }}</span>
             <span>{{ entry.observed_on }}</span>
             <span>置信 {{ entry.confidence }} / 5</span>
             <span class="stage-book__note">{{ entry.note || "无补充说明" }}</span>
+            <span
+              v-if="
+                selectedObservation.entry_lineage?.find(
+                  (line) => line.stage === entry.stage,
+                )?.revised
+              "
+              class="revised-pill"
+              data-check="entry-revised"
+            >
+              原
+              {{
+                selectedObservation.frozen_entries?.find(
+                  (frozen) => frozen.stage === entry.stage,
+                )?.observed_on
+              }}
+            </span>
             <button
               v-if="selectedObservation.status === 'open'"
               type="button"
@@ -236,6 +284,14 @@ async function completeObservation() {
             完成季节志
           </button>
         </div>
+
+        <template v-if="selectedObservation.status === 'completed'">
+          <LineageBook
+            v-if="selectedObservation.entry_lineage?.length"
+            :observation="selectedObservation"
+          />
+          <CorrectionPanel :observation="selectedObservation" />
+        </template>
       </div>
 
       <EmptyState
@@ -338,11 +394,21 @@ async function completeObservation() {
         >
           <span class="observation-index__icon">
             <LoaderCircle v-if="observation.status === 'open'" :size="16" />
+            <GitBranch v-else-if="observation.has_corrections" :size="16" />
             <Check v-else :size="16" />
           </span>
           <span>
             <strong>{{ observation.season }} · {{ observation.tree_code }}</strong>
             <small>{{ observation.cultivar }}</small>
+            <small v-if="observation.has_corrections" class="index-corrected">
+              已采用 {{ observation.current_correction_seq }} 次勘误
+            </small>
+            <small
+              v-if="observation.proposed_correction_count > 0"
+              class="index-correction-pending"
+            >
+              {{ observation.proposed_correction_count }} 条勘误待决
+            </small>
           </span>
           <CircleDashed v-if="observation.status === 'open'" :size="14" />
         </button>

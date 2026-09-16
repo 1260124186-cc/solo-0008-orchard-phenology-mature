@@ -19,6 +19,7 @@ def empty_state() -> dict[str, Any]:
         "observations": {},
         "comparisons": {},
         "briefs": {},
+        "corrections": {},
         "events": [],
     }
 
@@ -36,6 +37,7 @@ def ensure_state_shape(state: Any) -> dict[str, Any]:
         "observations",
         "comparisons",
         "briefs",
+        "corrections",
         "events",
     )
     if state.get("schema_version") != CURRENT_SCHEMA_VERSION:
@@ -51,8 +53,14 @@ def ensure_state_shape(state: Any) -> dict[str, Any]:
     for key in expected_containers:
         value = state.get(key)
         if key == "events":
+            if value is None:
+                state[key] = []
+                continue
             if not isinstance(value, list):
                 raise DomainError("state_corrupt", f"{key} 必须是数组", 500)
+            continue
+        if value is None:
+            state[key] = {}
             continue
         if not isinstance(value, dict):
             raise DomainError("state_corrupt", f"{key} 必须是对象", 500)
@@ -86,4 +94,11 @@ def check_relationships(state: dict[str, Any]) -> list[str]:
     for brief in state["briefs"].values():
         if brief["plot"]["id"] not in state["plots"]:
             problems.append(f"简报 {brief['id']} 引用了不存在的园区")
+    correction_ids = set(state["corrections"])
+    for correction in state["corrections"].values():
+        if correction["observation_id"] not in state["observations"]:
+            problems.append(f"勘误 {correction['id']} 引用了不存在的季节志")
+        supersedes = correction.get("supersedes_correction_id")
+        if supersedes and supersedes not in correction_ids:
+            problems.append(f"勘误 {correction['id']} 的前序勘误不存在")
     return problems

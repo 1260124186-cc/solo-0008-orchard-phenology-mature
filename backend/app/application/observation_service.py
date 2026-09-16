@@ -42,7 +42,13 @@ class ObservationService:
             if status and observation["status"] != status:
                 continue
             tree = state["trees"].get(observation["tree_id"])
-            items.append(observation_summary(observation, tree))
+            items.append(
+                observation_summary(
+                    observation,
+                    tree,
+                    state.get("corrections", {}),
+                )
+            )
         items.sort(
             key=lambda item: (
                 item["season"],
@@ -73,7 +79,7 @@ class ObservationService:
             return record
 
         record = self.repository.atomic_update(action)
-        return observation_summary(record, self._tree_snapshot(record["tree_id"]))
+        return self.get_observation(record["id"])
 
     def update_observation(
         self,
@@ -103,10 +109,7 @@ class ObservationService:
             return updated
 
         updated = self.repository.atomic_update(action)
-        return observation_summary(
-            updated,
-            self._tree_snapshot(updated["tree_id"]),
-        )
+        return self.get_observation(updated["id"])
 
     def add_stage(
         self,
@@ -131,10 +134,7 @@ class ObservationService:
             return updated
 
         updated = self.repository.atomic_update(action)
-        return observation_summary(
-            updated,
-            self._tree_snapshot(updated["tree_id"]),
-        )
+        return self.get_observation(updated["id"])
 
     def remove_stage(
         self,
@@ -166,10 +166,7 @@ class ObservationService:
             return updated
 
         updated = self.repository.atomic_update(action)
-        return observation_summary(
-            updated,
-            self._tree_snapshot(updated["tree_id"]),
-        )
+        return self.get_observation(updated["id"])
 
     def complete_observation(
         self,
@@ -199,10 +196,7 @@ class ObservationService:
             return updated
 
         updated = self.repository.atomic_update(action)
-        return observation_summary(
-            updated,
-            self._tree_snapshot(updated["tree_id"]),
-        )
+        return self.get_observation(updated["id"])
 
     def _detail(
         self,
@@ -215,7 +209,5 @@ class ObservationService:
         return observation_summary(
             observation,
             state["trees"].get(observation["tree_id"]),
+            state.get("corrections", {}),
         )
-
-    def _tree_snapshot(self, tree_id: str) -> dict[str, Any] | None:
-        return self.repository.read()["trees"].get(tree_id)

@@ -2,6 +2,7 @@ import { computed, reactive, readonly } from "vue";
 import { STAGES } from "../domain/stages";
 import type {
   ComparisonSummary,
+  CorrectionSummary,
   ObservationSummary,
   PlotDetail,
   PlotSummary,
@@ -23,6 +24,7 @@ interface WorkspaceState {
   selectedPlotId: string | null;
   observations: ObservationSummary[];
   selectedObservationId: string | null;
+  corrections: CorrectionSummary[];
   comparisons: ComparisonSummary[];
   selectedComparisonId: string | null;
   notices: Notice[];
@@ -39,6 +41,7 @@ const state = reactive<WorkspaceState>({
   selectedPlotId: null,
   observations: [],
   selectedObservationId: null,
+  corrections: [],
   comparisons: [],
   selectedComparisonId: null,
   notices: [],
@@ -61,6 +64,14 @@ const selectedComparison = computed(() =>
   null,
 );
 
+function correctionsForObservation(
+  observationId: string,
+): readonly CorrectionSummary[] {
+  return state.corrections.filter(
+    (item) => item.observation_id === observationId,
+  );
+}
+
 export function useWorkspace() {
   async function initialize(): Promise<void> {
     state.loading = true;
@@ -70,6 +81,7 @@ export function useWorkspace() {
       await Promise.all([
         refreshPlots(),
         refreshObservations(),
+        refreshCorrections(),
         refreshComparisons(),
       ]);
     } catch (error) {
@@ -133,6 +145,13 @@ export function useWorkspace() {
     }
   }
 
+  async function refreshCorrections(): Promise<void> {
+    const response = (await api.listCorrections()) as {
+      items: CorrectionSummary[];
+    };
+    state.corrections = response.items;
+  }
+
   async function startObservation(
     payload: Record<string, unknown>,
   ): Promise<ObservationSummary> {
@@ -183,9 +202,46 @@ export function useWorkspace() {
       items: ComparisonSummary[];
     };
     state.comparisons = response.items;
+    if (
+      state.selectedComparisonId &&
+      !state.comparisons.some(
+        (item) => item.id === state.selectedComparisonId,
+      )
+    ) {
+      state.selectedComparisonId = null;
+    }
     if (!state.selectedComparisonId && state.comparisons.length > 0) {
       state.selectedComparisonId = state.comparisons[0].id;
     }
+  }
+
+  async function createCorrection(
+    payload: Record<string, unknown>,
+  ): Promise<CorrectionSummary> {
+    const created = (await api.createCorrection(
+      payload,
+    )) as CorrectionSummary;
+    await Promise.all([refreshCorrections(), refreshObservations()]);
+    return created;
+  }
+
+  async function decideCorrection(
+    decision: "adopt" | "reject" | "withdraw",
+    correction: CorrectionSummary,
+    note = "",
+  ): Promise<void> {
+    if (decision === "adopt") {
+      await api.adoptCorrection(correction.id, correction.revision);
+    } else if (decision === "reject") {
+      await api.rejectCorrection(correction.id, correction.revision, note);
+    } else {
+      await api.withdrawCorrection(correction.id, correction.revision);
+    }
+    await Promise.all([
+      refreshCorrections(),
+      refreshObservations(),
+      refreshComparisons(),
+    ]);
   }
 
   async function createComparison(
@@ -278,6 +334,7 @@ export function useWorkspace() {
     initialize,
     refreshPlots,
     refreshObservations,
+    refreshCorrections,
     refreshComparisons,
     loadPlot,
     createPlot,
@@ -287,6 +344,9 @@ export function useWorkspace() {
     addStage,
     removeStage,
     completeObservation,
+    createCorrection,
+    decideCorrection,
+    correctionsForObservation,
     createComparison,
     createBrief,
     setActiveWorkspace,

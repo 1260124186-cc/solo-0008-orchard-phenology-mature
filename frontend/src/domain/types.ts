@@ -55,6 +55,22 @@ export interface StageEntry {
   created_at: string;
 }
 
+export interface EntryLineage {
+  stage: string;
+  frozen: {
+    observed_on: string;
+    confidence: number;
+    note: string;
+  };
+  current: {
+    observed_on: string;
+    confidence: number;
+    note: string;
+  };
+  revised: boolean;
+  correction_id: string | null;
+}
+
 export interface ObservationSummary {
   id: string;
   tree_id: string;
@@ -79,7 +95,59 @@ export interface ObservationSummary {
     }
   >;
   entries: readonly StageEntry[];
+  frozen_entries?: readonly StageEntry[];
+  current_entries?: readonly StageEntry[];
+  current_correction_id: string | null;
+  current_correction_seq: number;
+  has_corrections: boolean;
+  proposed_correction_count: number;
+  resolved_correction_count: number;
+  entry_lineage?: readonly EntryLineage[];
 }
+
+export type CorrectionStatus =
+  | "proposed"
+  | "adopted"
+  | "rejected"
+  | "withdrawn";
+
+export interface CorrectionChange {
+  stage: string;
+  observed_on?: string;
+  confidence?: number;
+  note?: string;
+}
+
+export interface CorrectionSummary {
+  id: string;
+  observation_id: string;
+  season: string;
+  tree_id: string;
+  plot_id: string;
+  tree_code: string;
+  cultivar: string;
+  reason: string;
+  changes: readonly CorrectionChange[];
+  status: CorrectionStatus;
+  revision: number;
+  proposed_by: string;
+  proposed_at: string;
+  supersedes_correction_id: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  adopted_at: string | null;
+  adoption_seq: number | null;
+  decision_note: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ObservationBasis {
+  observation_id: string;
+  current_correction_id: string | null;
+}
+
+export type BasisStatus = "current" | "superseded";
 
 export interface StageOffset {
   stage: string;
@@ -112,7 +180,20 @@ export interface ComparisonSummary {
     stability: string;
     sentence: string;
   };
+  left_basis: ObservationBasis | null;
+  right_basis: ObservationBasis | null;
+  supersedes_comparison_id: string | null;
+  superseded_by_id: string | null;
+  basis_status: BasisStatus;
   created_at: string;
+}
+
+export interface SupersededObservation {
+  observation_id: string;
+  frozen_correction_id: string | null;
+  current_correction_id: string | null;
+  season: string;
+  tree_code: string;
 }
 
 export interface BriefSummary {
@@ -126,6 +207,9 @@ export interface BriefSummary {
   observation_count: number;
   state_revision: number;
   created_at: string;
+  basis_status: BasisStatus;
+  superseded_observation_count: number;
+  superseded_observations?: readonly SupersededObservation[];
   payload?: {
     plot: PlotSummary;
     trees: readonly TreeRecord[];

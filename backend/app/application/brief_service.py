@@ -16,11 +16,18 @@ class BriefService:
 
     def list_briefs(self, *, plot_id: str | None = None) -> dict[str, Any]:
         state = self.repository.read()
+        corrections = state.get("corrections", {})
         items = []
         for record in state["briefs"].values():
             if plot_id and record["plot"]["id"] != plot_id:
                 continue
-            items.append(brief_summary(record, include_payload=False))
+            items.append(
+                brief_summary(
+                    record,
+                    include_payload=False,
+                    corrections=corrections,
+                )
+            )
         items.sort(key=lambda item: item["created_at"], reverse=True)
         return {"items": items, "total": len(items)}
 
@@ -29,7 +36,11 @@ class BriefService:
         record = state["briefs"].get(brief_id)
         if record is None:
             raise NotFoundError("编研简报", brief_id)
-        return brief_summary(record, include_payload=True)
+        return brief_summary(
+            record,
+            include_payload=True,
+            corrections=state.get("corrections", {}),
+        )
 
     def create_brief(
         self,
@@ -63,6 +74,7 @@ class BriefService:
                 plot,
                 trees,
                 observations,
+                state.setdefault("corrections", {}),
                 int(state["revision"]) + 1,
                 now_iso(),
             )
@@ -70,4 +82,4 @@ class BriefService:
             return record
 
         record = self.repository.atomic_update(action)
-        return brief_summary(record, include_payload=True)
+        return self.get_brief(record["id"])
