@@ -1403,6 +1403,16 @@ select {
   margin-top: 11px;
 }
 
+.stage-entry-form__note {
+  grid-column: span 2;
+}
+
+.stage-entry-form__hint {
+  margin: 8px 2px 0;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
 .completion-band {
   margin-top: 16px;
 }
@@ -1479,6 +1489,17 @@ select {
   border-left: 4px solid #c6a16a;
   font-size: 14px;
   line-height: 1.8;
+}
+
+.comparison-uncertainty {
+  margin: -8px 0 18px;
+  padding: 10px 14px;
+  color: #7a5a2e;
+  background: #f6efe2;
+  border: 1px dashed #c6a16a;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .comparison-pair {

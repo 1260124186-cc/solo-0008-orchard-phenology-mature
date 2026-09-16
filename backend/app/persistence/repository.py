@@ -44,6 +44,9 @@ class Repository:
     def open(self) -> None:
         self.database.initialize()
         self._import_legacy_state()
+        # 恢复后立即验证结构与日期精度，防止被截断的区间或被压扁的
+        # 比较结果进入后续领域计算。
+        ensure_state_shape(self.read())
         problems = check_relationships(self.read())
         if problems:
             raise DomainError(

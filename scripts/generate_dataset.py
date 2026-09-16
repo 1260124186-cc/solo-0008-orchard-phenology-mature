@@ -216,6 +216,7 @@ def _season_entries(season: str) -> list[dict[str, Any]]:
             "id": f"entry_{stage}_{start.isoformat()}",
             "stage": stage,
             "observed_on": (start + timedelta(days=offset)).isoformat(),
+            "precision": "day",
             "confidence": 4,
             "note": "规模数据",
             "created_at": "2026-01-01T00:00:00+00:00",
@@ -285,6 +286,7 @@ def _comparison_values(
     for stage in sorted(set(left_entries) & set(right_entries), key=ranks.get):
         left_date = date.fromisoformat(left_entries[stage]["observed_on"])
         right_date = date.fromisoformat(right_entries[stage]["observed_on"])
+        offset_days = (right_date - left_date).days
         offsets.append(
             {
                 "stage": stage,
@@ -292,7 +294,12 @@ def _comparison_values(
                 "rank": ranks[stage],
                 "left_date": left_date.isoformat(),
                 "right_date": right_date.isoformat(),
-                "offset_days": (right_date - left_date).days,
+                "left_precision": "day",
+                "right_precision": "day",
+                "offset_days": offset_days,
+                "offset_min_days": offset_days,
+                "offset_max_days": offset_days,
+                "offset_exact": True,
                 "confidence_gap": 0,
             }
         )

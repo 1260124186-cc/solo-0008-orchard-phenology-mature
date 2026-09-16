@@ -10,6 +10,7 @@ import {
 } from "@lucide/vue";
 import EmptyState from "../components/EmptyState.vue";
 import ChoiceField from "../components/ChoiceField.vue";
+import { formatObservedDate } from "../domain/datePrecision";
 import { formatTimestamp } from "../domain/rules";
 import { stageLabel } from "../domain/stages";
 import type { BriefSummary } from "../domain/types";
@@ -70,7 +71,7 @@ function downloadBrief() {
       `${observation.season} 年 · ${observation.tree_code} · ${observation.cultivar}`,
       ...observation.entries.map(
         (entry) =>
-          `  ${stageLabel(entry.stage)}：${entry.observed_on}（置信 ${entry.confidence}/5）`,
+          `  ${stageLabel(entry.stage)}：${formatObservedDate(entry)}（置信 ${entry.confidence}/5）`,
       ),
     ]),
   ];
@@ -193,7 +194,7 @@ function downloadBrief() {
           <div class="brief-season__entries">
             <span v-for="entry in observation.entries" :key="entry.id">
               {{ stageLabel(entry.stage) }}
-              <strong>{{ entry.observed_on }}</strong>
+              <strong>{{ formatObservedDate(entry) }}</strong>
             </span>
           </div>
         </div>

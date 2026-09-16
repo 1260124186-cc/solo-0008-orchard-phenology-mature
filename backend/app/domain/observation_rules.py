@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 from typing import Any
 
 from ..errors import ConflictError, PreconditionError, ValidationError
+from .date_precision import (
+    clean_observed_date,
+    ensure_within_season_window,
+    observed_date_from_entry,
+    stages_in_order,
+)
 from .plot_rules import new_identifier, now_iso, verify_revision
 from .stages import STAGE_BY_KEY, required_stage_keys, sort_stage_entries, stage_definition
 from .value_checks import (
     clean_confidence,
-    clean_date,
     clean_season,
     clean_text,
     reject_unknown_fields,
@@ -18,7 +22,14 @@ from .value_checks import (
 
 
 START_FIELDS = {"tree_id", "season", "observer", "note"}
-STAGE_FIELDS = {"stage", "observed_on", "confidence", "note"}
+STAGE_FIELDS = {
+    "stage",
+    "observed_on",
+    "observed_end_on",
+    "precision",
+    "confidence",
+    "note",
+}
 COMPLETE_FIELDS = {"revision"}
 
 
@@ -98,8 +109,8 @@ def add_stage_entry(
     ensure_observation_open(observation)
     verify_revision(observation, expected_revision)
     definition = stage_definition(str(payload.get("stage", "")))
-    observed_on = clean_date(payload.get("observed_on"), "observed_on")
-    validate_date_window(observed_on, observation["season"])
+    observed = clean_observed_date(payload)
+    ensure_within_season_window(observed, observation["season"])
     confidence = clean_confidence(payload.get("confidence"))
     note = clean_text(
         payload.get("note", ""),
@@ -114,17 +125,18 @@ def add_stage_entry(
             "该阶段已经记录，请先移除原条目",
             stage=definition.key,
         )
-    candidate_entries = [
-        *existing,
-        {
-            "id": new_identifier("entry"),
-            "stage": definition.key,
-            "observed_on": observed_on,
-            "confidence": confidence,
-            "note": note,
-            "created_at": now_iso(),
-        },
-    ]
+    entry = {
+        "id": new_identifier("entry"),
+        "stage": definition.key,
+        "observed_on": observed.anchor.isoformat(),
+        "confidence": confidence,
+        "note": note,
+        "created_at": now_iso(),
+        "precision": observed.precision,
+    }
+    if observed.precision == "range":
+        entry["observed_end_on"] = observed.end.isoformat()
+    candidate_entries = [*existing, entry]
     validate_stage_sequence(candidate_entries)
     return {
         **observation,
@@ -196,47 +208,29 @@ def ensure_observation_open(observation: dict[str, Any]) -> None:
         )
 
 
-def validate_date_window(observed_on: str, season: str) -> None:
-    season_year = int(season)
-    observed = date.fromisoformat(observed_on)
-    start = date(season_year, 1, 1) - timedelta(days=90)
-    end = date(season_year, 12, 31) + timedelta(days=90)
-    if observed < start or observed > end:
-        raise ValidationError(
-            "观察日期超出该季节允许窗口",
-            field_name="observed_on",
-            details={
-                "minimum": start.isoformat(),
-                "maximum": end.isoformat(),
-            },
-        )
-
-
 def validate_stage_sequence(entries: list[dict[str, Any]]) -> None:
     ordered = sort_stage_entries(entries)
     previous_rank = -1
-    previous_date: date | None = None
+    previous_observed = None
     previous_label = ""
     for entry in ordered:
         definition = stage_definition(str(entry.get("stage", "")))
-        observed = date.fromisoformat(clean_date(entry.get("observed_on"), "observed_on"))
+        observed = observed_date_from_entry(entry)
         if definition.rank < previous_rank:
             raise ValidationError(
                 "物候阶段顺序不合法",
                 details={"previous": previous_label, "current": definition.label},
             )
-        if previous_date is not None and observed < previous_date:
+        if not stages_in_order(previous_observed, observed):
             raise ValidationError(
                 "后一物候阶段的日期不能早于前一阶段",
                 details={
                     "previous": previous_label,
-                    "previous_date": previous_date.isoformat(),
                     "current": definition.label,
-                    "current_date": observed.isoformat(),
                 },
             )
         previous_rank = definition.rank
-        previous_date = observed
+        previous_observed = observed
         previous_label = definition.label
 
 
@@ -263,6 +257,8 @@ def observation_summary(
         "entry_map": {
             item["stage"]: {
                 "observed_on": item["observed_on"],
+                "observed_end_on": item.get("observed_end_on"),
+                "precision": item.get("precision", "day"),
                 "confidence": item["confidence"],
                 "note": item["note"],
             }

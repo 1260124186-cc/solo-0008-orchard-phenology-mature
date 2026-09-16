@@ -23,16 +23,7 @@ let frontend;
 let browser;
 
 try {
-  backend = startProcess(
-    "python3",
-    [
-      "scripts/run_server.py",
-      "--port",
-      "8765",
-      "--data-dir",
-      runtimeDir,
-    ],
-  );
+  backend = startBackend(runtimeDir);
   await waitForUrl(`${API_ORIGIN}/api/health`);
   frontend = startProcess("npm", [
     "run",
@@ -127,15 +118,26 @@ async function checkObservation(page) {
   await page.getByText("季节志已建立，可以开始补录阶段").waitFor();
 
   const entries = [
-    ["bud_burst", "2026-03-14"],
-    ["full_bloom", "2026-04-06"],
-    ["fruit_set", "2026-04-24"],
-    ["harvest", "2026-09-08"],
+    { stage: "bud_burst", precision: "day", date: "2026-03-14" },
+    {
+      stage: "full_bloom",
+      precision: "range",
+      date: "2026-04-04",
+      end: "2026-04-08",
+    },
+    { stage: "fruit_set", precision: "on_or_after", date: "2026-04-20" },
+    { stage: "harvest", precision: "day", date: "2026-09-08" },
   ];
   for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
     await page.locator('[data-check="stage-key"]').click();
-    await page.locator(`[data-choice-value="${entries[index][0]}"]`).click();
-    await page.locator('[data-check="stage-date"]').fill(entries[index][1]);
+    await page.locator(`[data-choice-value="${entry.stage}"]`).click();
+    await page.locator('[data-check="stage-precision"]').click();
+    await page.locator(`[data-choice-value="${entry.precision}"]`).click();
+    await page.locator('[data-check="stage-date"]').fill(entry.date);
+    if (entry.end) {
+      await page.locator('[data-check="stage-end-date"]').fill(entry.end);
+    }
     await page.locator('[data-check="stage-confidence"]').click();
     await page.locator('[data-choice-value="4"]').click();
     await page.locator('[data-check="add-stage"]').click();
@@ -143,6 +145,14 @@ async function checkObservation(page) {
       .locator('[data-check="stage-entry"]')
       .nth(index)
       .waitFor();
+  }
+  // 区间精度必须在页面以“起 至 止”展示，而不是被替换成某个单日。
+  const bloomRow = page
+    .locator('[data-check="stage-entry"]')
+    .nth(1)
+    .innerText();
+  if (!bloomRow.includes("2026-04-04 至 2026-04-08")) {
+    throw new Error("页面未保留区间精度的不确定范围");
   }
   await page.locator('[data-check="complete-season"]').click();
   await page.getByText("季节志已完成并冻结").waitFor();
@@ -160,6 +170,59 @@ async function checkObservation(page) {
     observation.entries.length !== entries.length
   ) {
     throw new Error("服务端季节志与页面操作不一致");
+  }
+  assertEntryPrecision(observation.entries, {
+    bud_burst: { precision: "day", observed_on: "2026-03-14" },
+    full_bloom: {
+      precision: "range",
+      observed_on: "2026-04-04",
+      observed_end_on: "2026-04-08",
+    },
+    fruit_set: { precision: "on_or_after", observed_on: "2026-04-20" },
+    harvest: { precision: "day", observed_on: "2026-09-08" },
+  });
+
+  // 恢复验证：使用同一数据目录重启后端，精度字段不能在恢复后丢失。
+  await stopProcess(backend);
+  backend = startBackend(runtimeDir);
+  await waitForUrl(`${API_ORIGIN}/api/health`);
+  const recovered = await api(
+    `/observations?tree_id=${encodeURIComponent(tree.id)}`,
+  );
+  const recoveredObservation = recovered.items[0];
+  assertEntryPrecision(recoveredObservation.entries, {
+    bud_burst: { precision: "day", observed_on: "2026-03-14" },
+    full_bloom: {
+      precision: "range",
+      observed_on: "2026-04-04",
+      observed_end_on: "2026-04-08",
+    },
+    fruit_set: { precision: "on_or_after", observed_on: "2026-04-20" },
+    harvest: { precision: "day", observed_on: "2026-09-08" },
+  });
+}
+
+function assertEntryPrecision(entries, expected) {
+  const byStage = Object.fromEntries(entries.map((entry) => [entry.stage, entry]));
+  for (const [stage, shape] of Object.entries(expected)) {
+    const entry = byStage[stage];
+    if (!entry) throw new Error(`服务端缺少阶段 ${stage}`);
+    if (entry.precision !== shape.precision) {
+      throw new Error(
+        `阶段 ${stage} 精度应为 ${shape.precision}，实际为 ${entry.precision}`,
+      );
+    }
+    if (entry.observed_on !== shape.observed_on) {
+      throw new Error(
+        `阶段 ${stage} 日期应为 ${shape.observed_on}，实际为 ${entry.observed_on}`,
+      );
+    }
+    const expectedEnd = shape.observed_end_on ?? null;
+    if ((entry.observed_end_on ?? null) !== expectedEnd) {
+      throw new Error(
+        `阶段 ${stage} 结束日期应为 ${expectedEnd}，实际为 ${entry.observed_end_on ?? null}`,
+      );
+    }
   }
 }
 
@@ -211,8 +274,109 @@ async function checkComparison(page) {
   if (comparisons.items.length !== 1) {
     throw new Error("服务端未保存对比图谱");
   }
-  if (comparisons.items[0].stage_offsets.length !== 4) {
+  const exactComparison = comparisons.items[0];
+  if (exactComparison.stage_offsets.length !== 4) {
     throw new Error("服务端对比阶段数不符合预期");
+  }
+  // 单日记录的历史比较保持原含义：精确偏移、平均偏移为确定值。
+  // 四个必需阶段按 rank 20/40/60/80 排列，历史单日偏移应为 5/4/4/5。
+  const expectedOffsets = { bud_burst: 5, full_bloom: 4, fruit_set: 4, harvest: 5 };
+  for (const row of exactComparison.stage_offsets) {
+    if (row.offset_days !== expectedOffsets[row.stage]) {
+      throw new Error(`单日历史比较的精确偏移被改变：${row.stage}`);
+    }
+  }
+  if (exactComparison.summary.average_offset_days !== 4.5) {
+    throw new Error("单日历史比较的平均偏移应保持 4.5 天");
+  }
+
+  // 不确定精度比较：盛花期改为区间，偏移必须保留范围而不是虚构中点。
+  const uncertainLeft = await seedCompletedSeason({
+    plotCode: "OR-2303",
+    plotName: "北沟梨园",
+    cultivar: "青梨",
+    treeCode: "OR-2303-T01",
+    season: "2026",
+    dates: ["2026-03-10", "2026-04-01", "2026-04-18", "2026-09-02"],
+    stageOverrides: {
+      full_bloom: {
+        precision: "range",
+        observed_on: "2026-04-01",
+        observed_end_on: "2026-04-03",
+      },
+    },
+  });
+  const uncertainRight = await seedCompletedSeason({
+    plotCode: "OR-2304",
+    plotName: "东岭梨园",
+    cultivar: "酥梨",
+    treeCode: "OR-2304-T01",
+    season: "2026",
+    dates: ["2026-03-15", "2026-04-05", "2026-04-22", "2026-09-07"],
+    stageOverrides: {
+      full_bloom: {
+        precision: "range",
+        observed_on: "2026-04-05",
+        observed_end_on: "2026-04-09",
+      },
+    },
+  });
+  const uncertain = await api("/comparisons", "PUT", {
+    title: "区间盛花期对齐",
+    left_observation_id: uncertainLeft.id,
+    right_observation_id: uncertainRight.id,
+  });
+  const bloom = uncertain.stage_offsets.find(
+    (row) => row.stage === "full_bloom",
+  );
+  if (bloom.offset_exact !== false || "offset_days" in bloom) {
+    throw new Error("区间比较不得给出虚构的精确偏移");
+  }
+  if (bloom.offset_min_days !== 2 || bloom.offset_max_days !== 8) {
+    throw new Error(
+      `区间盛花期偏移范围应为 +2 至 +8 天，实际为 ${bloom.offset_min_days} 至 ${bloom.offset_max_days}`,
+    );
+  }
+  if (bloom.left_end_date !== "2026-04-03" || bloom.right_end_date !== "2026-04-09") {
+    throw new Error("区间比较未保留两侧结束日期");
+  }
+  if (uncertain.summary.average_offset_days !== null) {
+    throw new Error("含区间阶段时平均偏移必须为空，不能取中点");
+  }
+  const exactRows = uncertain.stage_offsets.filter((row) => row.offset_exact);
+  if (exactRows.length !== 3 || uncertain.summary.exact_stage_count !== 3) {
+    throw new Error("其余单日阶段仍应给出精确偏移");
+  }
+
+  // 恢复验证：重启后端后，精确与不确定两类比较都保持原结构。
+  await stopProcess(backend);
+  backend = startBackend(runtimeDir);
+  await waitForUrl(`${API_ORIGIN}/api/health`);
+  const recoveredComparisons = await api("/comparisons");
+  if (recoveredComparisons.items.length !== 2) {
+    throw new Error("恢复后对比图谱数量不一致");
+  }
+  const recoveredExact = recoveredComparisons.items.find(
+    (item) => item.title === exactComparison.title,
+  );
+  const recoveredUncertain = recoveredComparisons.items.find(
+    (item) => item.title === uncertain.title,
+  );
+  if (!recoveredExact || !recoveredUncertain) {
+    throw new Error("恢复后找不到原有对比图谱");
+  }
+  if (recoveredExact.summary.average_offset_days !== 4.5) {
+    throw new Error("恢复后单日比较的平均偏移被改变");
+  }
+  const recoveredBloom = recoveredUncertain.stage_offsets.find(
+    (row) => row.stage === "full_bloom",
+  );
+  if (
+    recoveredBloom.offset_exact !== false ||
+    recoveredBloom.offset_min_days !== 2 ||
+    recoveredBloom.offset_max_days !== 8
+  ) {
+    throw new Error("恢复后区间偏移范围被丢弃或改写");
   }
 }
 
@@ -255,14 +419,16 @@ async function seedCompletedSeason(config) {
   });
   const stages = ["bud_burst", "full_bloom", "fruit_set", "harvest"];
   for (let index = 0; index < stages.length; index += 1) {
+    const stage = stages[index];
+    const override = config.stageOverrides?.[stage];
+    const stagePayload = override
+      ? { stage, confidence: 4, note: "", ...override }
+      : { stage, observed_on: config.dates[index], confidence: 4, note: "" };
     observation = await api(
       `/observations/${observation.id}/stages`,
       "PUT",
       {
-        stage: stages[index],
-        observed_on: config.dates[index],
-        confidence: 4,
-        note: "",
+        ...stagePayload,
         revision: observation.revision,
       },
     );
@@ -300,8 +466,17 @@ async function api(path, method = "GET", body) {
   return payload;
 }
 
-function startProcess(command, args) {
-  const child = spawn(command, args, {
+function startBackend(runtimeDir) {
+  return startProcess("python3", [
+    "scripts/run_server.py",
+    "--port",
+    "8765",
+    "--data-dir",
+    runtimeDir,
+  ]);
+}
+
+function startProcess(command, args) {  const child = spawn(command, args, {
     cwd: ROOT,
     env: { ...process.env, CI: "1" },
     stdio: ["ignore", "pipe", "pipe"],

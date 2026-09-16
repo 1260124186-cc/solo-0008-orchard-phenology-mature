@@ -13,6 +13,7 @@ import EmptyState from "../components/EmptyState.vue";
 import ChoiceField from "../components/ChoiceField.vue";
 import ObservationStageForm from "../components/ObservationStageForm.vue";
 import StageTrack from "../components/StageTrack.vue";
+import { formatObservedDate } from "../domain/datePrecision";
 import { formatTimestamp, missingRequiredStages } from "../domain/rules";
 import { completedProgress, stageLabel } from "../domain/stages";
 import type { ObservationSummary, TreeRecord } from "../domain/types";
@@ -199,7 +200,7 @@ async function completeObservation() {
             data-check="stage-entry"
           >
             <span class="stage-book__stage">{{ stageLabel(entry.stage) }}</span>
-            <span>{{ entry.observed_on }}</span>
+            <span>{{ formatObservedDate(entry) }}</span>
             <span>置信 {{ entry.confidence }} / 5</span>
             <span class="stage-book__note">{{ entry.note || "无补充说明" }}</span>
             <button

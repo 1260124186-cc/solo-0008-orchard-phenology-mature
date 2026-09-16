@@ -3,6 +3,7 @@ export type WorkspaceKey = "catalog" | "observation" | "comparison" | "brief";
 export type PlotStatus = "draft" | "confirmed";
 export type TreeStatus = "active" | "retired" | "lost";
 export type ObservationStatus = "open" | "completed";
+export type DatePrecision = "day" | "range" | "on_or_before" | "on_or_after";
 
 export interface StageDefinition {
   key: string;
@@ -50,6 +51,8 @@ export interface StageEntry {
   id: string;
   stage: string;
   observed_on: string;
+  observed_end_on?: string | null;
+  precision: DatePrecision;
   confidence: number;
   note: string;
   created_at: string;
@@ -74,6 +77,8 @@ export interface ObservationSummary {
     string,
     {
       observed_on: string;
+      observed_end_on?: string | null;
+      precision: DatePrecision;
       confidence: number;
       note: string;
     }
@@ -87,7 +92,14 @@ export interface StageOffset {
   rank: number;
   left_date: string;
   right_date: string;
-  offset_days: number;
+  left_end_date?: string;
+  right_end_date?: string;
+  left_precision: DatePrecision;
+  right_precision: DatePrecision;
+  offset_days?: number;
+  offset_min_days: number | null;
+  offset_max_days: number | null;
+  offset_exact: boolean;
   confidence_gap: number;
 }
 
@@ -103,9 +115,11 @@ export interface ComparisonSummary {
   summary: {
     title: string;
     common_stage_count: number;
-    average_offset_days: number;
-    minimum_offset_days: number;
-    maximum_offset_days: number;
+    all_dates_exact: boolean;
+    exact_stage_count: number;
+    average_offset_days: number | null;
+    minimum_offset_days: number | null;
+    maximum_offset_days: number | null;
     earliest_stage: string;
     latest_stage: string;
     direction: string;

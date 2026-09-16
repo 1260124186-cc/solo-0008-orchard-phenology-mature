@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Check, Circle } from "@lucide/vue";
+import { formatObservedDate } from "../domain/datePrecision";
 import { STAGES, stageLabel } from "../domain/stages";
 import type { ObservationSummary } from "../domain/types";
 
@@ -41,7 +42,8 @@ function stageState(stage: string): "done" | "missing-required" | "pending" {
       <div class="stage-track__copy">
         <strong>{{ stageLabel(stage.key) }}</strong>
         <small v-if="entryFor(stage.key)">
-          {{ entryFor(stage.key)?.observed_on }} · 置信 {{ entryFor(stage.key)?.confidence }}
+          {{ formatObservedDate(entryFor(stage.key)!) }} · 置信
+          {{ entryFor(stage.key)?.confidence }}
         </small>
         <small v-else>{{ stage.required_for_completion ? "完成所需" : "可选记录" }}</small>
       </div>

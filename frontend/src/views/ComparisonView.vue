@@ -9,7 +9,13 @@ import {
 import EmptyState from "../components/EmptyState.vue";
 import ChoiceField from "../components/ChoiceField.vue";
 import StageTrack from "../components/StageTrack.vue";
-import { canCompareObservations, formatOffset, formatTimestamp } from "../domain/rules";
+import {
+  formatExactOffset,
+  formatObservedDate,
+  formatOffsetRange,
+} from "../domain/datePrecision";
+import { canCompareObservations, formatTimestamp } from "../domain/rules";
+import type { StageOffset } from "../domain/types";
 import { useWorkspace } from "../app/workspace";
 
 const workspace = useWorkspace();
@@ -88,6 +94,59 @@ async function createComparison() {
       }),
     "对比图谱已生成并保存",
   );
+}
+
+function offsetSideDate(row: StageOffset, side: "left" | "right"): string {
+  const anchor = side === "left" ? row.left_date : row.right_date;
+  const precision = side === "left" ? row.left_precision : row.right_precision;
+  const end = side === "left" ? row.left_end_date : row.right_end_date;
+  return formatObservedDate({
+    observed_on: anchor,
+    observed_end_on: end ?? null,
+    precision: precision ?? "day",
+  });
+}
+
+function offsetText(row: StageOffset): string {
+  // 历史比较记录只有 offset_days，按精确偏移保留原含义。
+  if (
+    row.offset_min_days === undefined &&
+    row.offset_max_days === undefined &&
+    typeof row.offset_days === "number"
+  ) {
+    return formatExactOffset(row.offset_days);
+  }
+  return formatOffsetRange({
+    minimum: row.offset_min_days ?? null,
+    maximum: row.offset_max_days ?? null,
+    exact: Boolean(row.offset_exact),
+    value: row.offset_days,
+  });
+}
+
+function offsetTone(row: StageOffset): "is-early" | "is-late" | "" {
+  const exact =
+    row.offset_exact === undefined
+      ? typeof row.offset_days === "number"
+      : Boolean(row.offset_exact);
+  if (!exact) return "";
+  const value = row.offset_days ?? 0;
+  if (value < 0) return "is-early";
+  if (value > 0) return "is-late";
+  return "";
+}
+
+function overallOffsetText(): string {
+  const summary = selectedComparison.value?.summary;
+  if (!summary) return "";
+  if (summary.average_offset_days !== null) {
+    return `${summary.average_offset_days}`;
+  }
+  return formatOffsetRange({
+    minimum: summary.minimum_offset_days,
+    maximum: summary.maximum_offset_days,
+    exact: false,
+  });
 }
 </script>
 
@@ -170,6 +229,14 @@ async function createComparison() {
       <p class="comparison-sentence" data-check="comparison-sentence">
         {{ selectedComparison.summary.sentence }}
       </p>
+      <p
+        v-if="selectedComparison.summary.all_dates_exact === false"
+        class="comparison-uncertainty"
+        data-check="comparison-uncertainty"
+      >
+        其中 {{ selectedComparison.summary.exact_stage_count }}
+        个阶段为单日对齐；区间或边界阶段按可能范围给出偏移，不选取虚构的精确日期。
+      </p>
 
       <div class="comparison-pair">
         <div>
@@ -198,16 +265,10 @@ async function createComparison() {
           data-check="offset-row"
         >
           <strong>{{ offset.label }}</strong>
-          <span>{{ offset.left_date }}</span>
-          <span>{{ offset.right_date }}</span>
-          <span
-            class="offset-pill"
-            :class="{
-              'is-early': offset.offset_days < 0,
-              'is-late': offset.offset_days > 0,
-            }"
-          >
-            {{ formatOffset(offset.offset_days) }}
+          <span>{{ offsetSideDate(offset, "left") }}</span>
+          <span>{{ offsetSideDate(offset, "right") }}</span>
+          <span class="offset-pill" :class="offsetTone(offset)">
+            {{ offsetText(offset) }}
           </span>
           <span>{{ offset.confidence_gap }}</span>
         </div>
@@ -219,8 +280,14 @@ async function createComparison() {
           <span>共同阶段</span>
         </div>
         <div>
-          <strong>{{ selectedComparison.summary.average_offset_days }}</strong>
-          <span>平均偏移 / 天</span>
+          <strong>{{ overallOffsetText() }}</strong>
+          <span>
+            {{
+              selectedComparison.summary.average_offset_days !== null
+                ? "平均偏移 / 天"
+                : "整体偏移范围"
+            }}
+          </span>
         </div>
         <div>
           <strong>{{ selectedComparison.summary.direction }}</strong>

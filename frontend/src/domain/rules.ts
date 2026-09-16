@@ -1,5 +1,15 @@
+import {
+  entryInterval,
+  intervalDefinitelyBefore,
+} from "./datePrecision";
 import { STAGE_BY_KEY } from "./stages";
-import type { ObservationSummary, PlotSummary, StageEntry, TreeRecord } from "./types";
+import type {
+  DatePrecision,
+  ObservationSummary,
+  PlotSummary,
+  StageEntry,
+  TreeRecord,
+} from "./types";
 
 export interface FieldIssue {
   field: string;
@@ -49,16 +59,102 @@ export function validateTreeDraft(tree: Partial<TreeRecord>): FieldIssue[] {
   return issues;
 }
 
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_PRECISIONS: readonly DatePrecision[] = [
+  "day",
+  "range",
+  "on_or_before",
+  "on_or_after",
+];
+
+function parseIsoDate(value: string): Date | null {
+  if (!DATE_PATTERN.test(value)) return null;
+  const parts = value.split("-").map(Number);
+  const parsed = new Date(parts[0], parts[1] - 1, parts[2]);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function sameDayIso(value: Date): string {
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+  return `${value.getFullYear()}-${month}-${day}`;
+}
+
+export function stageDraftInterval(
+  entry: Partial<StageEntry>,
+): { start: string | null; end: string | null } | null {
+  const precision: DatePrecision = entry.precision ?? "day";
+  if (!entry.observed_on || !DATE_PATTERN.test(entry.observed_on)) return null;
+  if (precision === "range") {
+    if (
+      !entry.observed_end_on ||
+      !DATE_PATTERN.test(entry.observed_end_on) ||
+      entry.observed_end_on < entry.observed_on
+    ) {
+      return null;
+    }
+    return { start: entry.observed_on, end: entry.observed_end_on };
+  }
+  if (precision === "on_or_before") {
+    return { start: null, end: entry.observed_on };
+  }
+  if (precision === "on_or_after") {
+    return { start: entry.observed_on, end: null };
+  }
+  return { start: entry.observed_on, end: entry.observed_on };
+}
+
 export function validateStageDraft(
   entry: Partial<StageEntry>,
   existing: readonly StageEntry[],
+  season: string,
 ): FieldIssue[] {
   const issues: FieldIssue[] = [];
   if (!entry.stage || !STAGE_BY_KEY[entry.stage]) {
     issues.push({ field: "stage", message: "请选择物候阶段" });
   }
-  if (!entry.observed_on || !/^\d{4}-\d{2}-\d{2}$/.test(entry.observed_on)) {
+  const precision: DatePrecision = entry.precision ?? "day";
+  if (!DATE_PRECISIONS.includes(precision)) {
+    issues.push({ field: "precision", message: "请选择日期精度" });
+  }
+  if (!entry.observed_on || !DATE_PATTERN.test(entry.observed_on)) {
     issues.push({ field: "observed_on", message: "请选择观察日期" });
+  }
+  if (precision === "range") {
+    if (!entry.observed_end_on || !DATE_PATTERN.test(entry.observed_end_on)) {
+      issues.push({ field: "observed_end_on", message: "请补全区间结束日期" });
+    } else if (
+      entry.observed_on &&
+      DATE_PATTERN.test(entry.observed_on) &&
+      entry.observed_end_on < entry.observed_on
+    ) {
+      issues.push({
+        field: "observed_end_on",
+        message: "结束日期不能早于开始日期",
+      });
+    }
+  }
+  if (entry.observed_on && DATE_PATTERN.test(entry.observed_on)) {
+    const observed = parseIsoDate(entry.observed_on);
+    const windowStart = parseIsoDate(seasonWindow(season).start);
+    const windowEnd = parseIsoDate(seasonWindow(season).end);
+    if (observed !== null && windowStart !== null && windowEnd !== null) {
+      if (observed < windowStart || observed > windowEnd) {
+        issues.push({
+          field: "observed_on",
+          message: "观察日期超出该季节允许窗口",
+        });
+      }
+      if (precision === "range" && entry.observed_end_on) {
+        const end = parseIsoDate(entry.observed_end_on);
+        if (end !== null && (end < windowStart || end > windowEnd)) {
+          issues.push({
+            field: "observed_end_on",
+            message: "区间结束日期超出该季节允许窗口",
+          });
+        }
+      }
+    }
   }
   if (existing.some((item) => item.stage === entry.stage)) {
     issues.push({ field: "stage", message: "该阶段已经存在" });
@@ -67,26 +163,42 @@ export function validateStageDraft(
   if (!Number.isInteger(confidence) || confidence < 1 || confidence > 5) {
     issues.push({ field: "confidence", message: "置信度须在 1 到 5 之间" });
   }
-  if (entry.observed_on) {
-    const candidate = [...existing, entry as StageEntry]
-      .filter((item) => STAGE_BY_KEY[item.stage])
-      .sort(
-        (left, right) =>
-          STAGE_BY_KEY[left.stage].rank - STAGE_BY_KEY[right.stage].rank,
-      );
+  const candidateInterval = stageDraftInterval(entry);
+  if (candidateInterval) {
+    const candidate = [
+      ...existing
+        .filter((item) => STAGE_BY_KEY[item.stage])
+        .map((item) => ({
+          stage: item.stage,
+          interval: entryInterval(item),
+        })),
+      { stage: entry.stage ?? "", interval: candidateInterval },
+    ].sort(
+      (left, right) =>
+        STAGE_BY_KEY[left.stage].rank - STAGE_BY_KEY[right.stage].rank,
+    );
     for (let index = 1; index < candidate.length; index += 1) {
       const previous = candidate[index - 1];
       const current = candidate[index];
-      if (current.observed_on < previous.observed_on) {
+      if (intervalDefinitelyBefore(previous.interval, current.interval)) {
         issues.push({
           field: "observed_on",
-          message: `${STAGE_BY_KEY[current.stage].label}不能早于${STAGE_BY_KEY[previous.stage].label}`,
+          message: `${STAGE_BY_KEY[current.stage].label}不可能早于${STAGE_BY_KEY[previous.stage].label}`,
         });
         break;
       }
     }
   }
   return issues;
+}
+
+export function seasonWindow(season: string): { start: string; end: string } {
+  const year = Number(season);
+  return { start: sameDayIsoDate(year - 1, 9, 3), end: sameDayIsoDate(year + 1, 2, 31) };
+}
+
+function sameDayIsoDate(year: number, month: number, day: number): string {
+  return sameDayIso(new Date(year, month, day));
 }
 
 export function missingRequiredStages(observation: ObservationSummary): string[] {

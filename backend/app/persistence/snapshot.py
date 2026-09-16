@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..domain.date_precision import (
+    DATE_PRECISIONS,
+    observed_date_from_entry,
+)
+from ..domain.stages import STAGE_BY_KEY
 from ..errors import DomainError
 
 
@@ -65,7 +70,112 @@ def ensure_state_shape(state: Any) -> dict[str, Any]:
                     f"{key}.{identifier} 的标识不一致",
                     500,
                 )
+            if key == "observations":
+                _check_observation_record(record)
+            elif key == "comparisons":
+                _check_comparison_record(record)
     return state
+
+
+def _check_observation_record(record: dict[str, Any]) -> None:
+    """恢复后验证阶段条目的日期精度没有被截断或破坏。"""
+
+    entries = record.get("entries")
+    if not isinstance(entries, list):
+        raise DomainError("state_corrupt", "季节志条目不是数组", 500)
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise DomainError("state_corrupt", "季节志条目不是对象", 500)
+        stage = entry.get("stage")
+        if stage not in STAGE_BY_KEY:
+            raise DomainError(
+                "state_corrupt",
+                f"季节志 {record.get('id')} 含未知阶段 {stage!r}",
+                500,
+            )
+        precision = entry.get("precision", "day")
+        # 历史条目缺省 precision，按单日接受；其它值必须在精度表内。
+        if precision not in DATE_PRECISIONS:
+            raise DomainError(
+                "state_corrupt",
+                f"阶段 {stage} 的日期精度不受支持：{precision!r}",
+                500,
+            )
+        if not isinstance(entry.get("observed_on"), str):
+            raise DomainError(
+                "state_corrupt",
+                f"阶段 {stage} 缺少观察日期",
+                500,
+            )
+        if precision == "range":
+            if not isinstance(entry.get("observed_end_on"), str):
+                raise DomainError(
+                    "state_corrupt",
+                    f"区间阶段 {stage} 缺少结束日期",
+                    500,
+                )
+        elif entry.get("observed_end_on") is not None:
+            raise DomainError(
+                "state_corrupt",
+                f"非区间阶段 {stage} 残留了结束日期",
+                500,
+            )
+        # 解析区间结构（日期格式、起止先后、跨字段一致性）。
+        observed_date_from_entry(entry)
+
+
+def _check_comparison_record(record: dict[str, Any]) -> None:
+    """恢复后验证比较结果仍带着不确定范围，而不是被压成虚构精确值。"""
+
+    rows = record.get("stage_offsets")
+    if not isinstance(rows, list):
+        raise DomainError("state_corrupt", "对比图谱阶段结果不是数组", 500)
+    for row in rows:
+        if not isinstance(row, dict):
+            raise DomainError("state_corrupt", "对比阶段结果不是对象", 500)
+        stage = row.get("stage")
+        if stage not in STAGE_BY_KEY:
+            raise DomainError(
+                "state_corrupt",
+                f"对比图谱 {record.get('id')} 含未知阶段 {stage!r}",
+                500,
+            )
+        offset_min = row.get("offset_min_days")
+        offset_max = row.get("offset_max_days")
+        if offset_min is None and offset_max is None:
+            # 历史比较结果只有 offset_days：按精确偏移的旧记录接受。
+            legacy_offset = row.get("offset_days")
+            if not (
+                isinstance(legacy_offset, int) and not isinstance(legacy_offset, bool)
+            ):
+                raise DomainError(
+                    "state_corrupt",
+                    f"对比阶段 {stage} 缺少有效的偏移范围",
+                    500,
+                )
+            continue
+        for bound in (offset_min, offset_max):
+            if bound is not None and (
+                isinstance(bound, bool) or not isinstance(bound, int)
+            ):
+                raise DomainError(
+                    "state_corrupt",
+                    f"对比阶段 {stage} 的偏移边界必须是整数或空",
+                    500,
+                )
+        if offset_min is not None and offset_max is not None:
+            if offset_min > offset_max:
+                raise DomainError(
+                    "state_corrupt",
+                    f"对比阶段 {stage} 的偏移下确界大于上确界",
+                    500,
+                )
+        if row.get("offset_exact") is True and offset_min != offset_max:
+            raise DomainError(
+                "state_corrupt",
+                f"对比阶段 {stage} 标记为精确但偏移范围不一致",
+                500,
+            )
 
 
 def check_relationships(state: dict[str, Any]) -> list[str]:
