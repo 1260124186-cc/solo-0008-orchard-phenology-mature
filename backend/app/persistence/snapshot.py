@@ -140,10 +140,18 @@ def _check_comparison_record(record: dict[str, Any]) -> None:
                 f"对比图谱 {record.get('id')} 含未知阶段 {stage!r}",
                 500,
             )
-        offset_min = row.get("offset_min_days")
-        offset_max = row.get("offset_max_days")
-        if offset_min is None and offset_max is None:
-            # 历史比较结果只有 offset_days：按精确偏移的旧记录接受。
+        has_min = "offset_min_days" in row
+        has_max = "offset_max_days" in row
+        has_exact = "offset_exact" in row
+        if not (has_min and has_max and has_exact):
+            # 历史比较结果只有 offset_days：三个新字段必须整体缺失，
+            # 按精确偏移的旧记录接受；混合形态属于损坏。
+            if has_min or has_max or has_exact:
+                raise DomainError(
+                    "state_corrupt",
+                    f"对比阶段 {stage} 的偏移范围字段不完整",
+                    500,
+                )
             legacy_offset = row.get("offset_days")
             if not (
                 isinstance(legacy_offset, int) and not isinstance(legacy_offset, bool)
@@ -154,6 +162,18 @@ def _check_comparison_record(record: dict[str, Any]) -> None:
                     500,
                 )
             continue
+
+        offset_min = row["offset_min_days"]
+        offset_max = row["offset_max_days"]
+        offset_exact = row["offset_exact"]
+        if not isinstance(offset_exact, bool):
+            raise DomainError(
+                "state_corrupt",
+                f"对比阶段 {stage} 的精确标记必须是布尔值",
+                500,
+            )
+        # 上下界均空表示两边同方向开放（都“不早于”或都“不晚于”），
+        # 是合法的“方向待定”不确定行，不能当作损坏。
         for bound in (offset_min, offset_max):
             if bound is not None and (
                 isinstance(bound, bool) or not isinstance(bound, int)
@@ -170,10 +190,29 @@ def _check_comparison_record(record: dict[str, Any]) -> None:
                     f"对比阶段 {stage} 的偏移下确界大于上确界",
                     500,
                 )
-        if row.get("offset_exact") is True and offset_min != offset_max:
+        if offset_exact:
+            # 精确行必须给出确定且相等的上下界；不确定行不得携带虚构精确值。
+            if offset_min != offset_max or offset_min is None:
+                raise DomainError(
+                    "state_corrupt",
+                    f"对比阶段 {stage} 标记为精确但偏移范围不一致",
+                    500,
+                )
+            exact_offset = row.get("offset_days")
+            if not (
+                isinstance(exact_offset, int) and not isinstance(exact_offset, bool)
+            ) or exact_offset != offset_min:
+                raise DomainError(
+                    "state_corrupt",
+                    f"对比阶段 {stage} 的精确偏移与范围不一致",
+                    500,
+                )
+        elif isinstance(row.get("offset_days"), int) and not isinstance(
+            row.get("offset_days"), bool
+        ):
             raise DomainError(
                 "state_corrupt",
-                f"对比阶段 {stage} 标记为精确但偏移范围不一致",
+                f"对比阶段 {stage} 是不确定偏移却携带虚构的精确天数",
                 500,
             )
 

@@ -348,12 +348,98 @@ async function checkComparison(page) {
     throw new Error("其余单日阶段仍应给出精确偏移");
   }
 
-  // 恢复验证：重启后端后，精确与不确定两类比较都保持原结构。
+  // 同方向开放边界：两份季节志的盛花期都录“不早于”，偏移行上下界全空。
+  const openLeft = await seedCompletedSeason({
+    plotCode: "OR-2305",
+    plotName: "北坡梨园",
+    cultivar: "青霄梨",
+    treeCode: "OR-2305-T01",
+    season: "2026",
+    dates: ["2026-03-10", "2026-04-01", "2026-04-18", "2026-09-02"],
+    stageOverrides: {
+      full_bloom: { precision: "on_or_after", observed_on: "2026-04-01" },
+    },
+  });
+  const openRight = await seedCompletedSeason({
+    plotCode: "OR-2306",
+    plotName: "南坡梨园",
+    cultivar: "丹霞梨",
+    treeCode: "OR-2306-T01",
+    season: "2026",
+    dates: ["2026-03-15", "2026-04-05", "2026-04-22", "2026-09-07"],
+    stageOverrides: {
+      full_bloom: { precision: "on_or_after", observed_on: "2026-04-05" },
+    },
+  });
+
+  // 从页面创建该比较（下拉里选择北坡 / 南坡两份季节志）。
+  await page.locator('[data-check="left-observation"]').click();
+  await page
+    .locator(`[data-choice-value="${openLeft.id}"]`)
+    .click();
+  await page.locator('[data-check="right-observation"]').click();
+  await page
+    .locator(`[data-choice-value="${openRight.id}"]`)
+    .click();
+  await page.locator('[data-check="comparison-title"]').fill(
+    "2026 年青霄梨与丹霞梨开放边界对齐",
+  );
+  await page.locator('[data-check="create-comparison"]').click();
+  await page.getByText("对比图谱已生成并保存").waitFor();
+  const openRowText = await page
+    .locator('[data-check="offset-row"]')
+    .filter({ hasText: "盛花期" })
+    .first()
+    .innerText();
+  if (!openRowText.includes("方向待定")) {
+    throw new Error(`页面未把全开放偏移显示为方向待定：${openRowText}`);
+  }
+  const openSentence = await page
+    .locator('[data-check="comparison-sentence"]')
+    .innerText();
+  if (!openSentence.includes("方向待定")) {
+    throw new Error("页面摘要未说明全开放比较方向待定");
+  }
+
+  const openComparisons = await api("/comparisons");
+  const openComparison = openComparisons.items.find(
+    (item) => item.title === "2026 年青霄梨与丹霞梨开放边界对齐",
+  );
+  if (!openComparison) {
+    throw new Error("服务端未保存同方向开放比较");
+  }
+  const openBloom = openComparison.stage_offsets.find(
+    (row) => row.stage === "full_bloom",
+  );
+  if (openBloom.offset_exact !== false) {
+    throw new Error("全开放偏移不得标记为精确");
+  }
+  if (
+    openBloom.offset_min_days !== null ||
+    openBloom.offset_max_days !== null
+  ) {
+    throw new Error("全开放偏移上下界必须为空");
+  }
+  if ("offset_days" in openBloom) {
+    throw new Error("全开放偏移行不得携带虚构的 offset_days");
+  }
+  if (
+    openComparison.summary.average_offset_days !== null ||
+    openComparison.summary.minimum_offset_days !== null ||
+    openComparison.summary.maximum_offset_days !== null
+  ) {
+    throw new Error("全开放比较摘要必须返回方向待定的空边界");
+  }
+  if (!openComparison.summary.sentence.includes("方向待定")) {
+    throw new Error("服务端摘要未返回方向待定");
+  }
+
+  // 恢复验证：重启后端后，精确、区间、全开放三类比较都保持原结构。
   await stopProcess(backend);
   backend = startBackend(runtimeDir);
   await waitForUrl(`${API_ORIGIN}/api/health`);
   const recoveredComparisons = await api("/comparisons");
-  if (recoveredComparisons.items.length !== 2) {
+  if (recoveredComparisons.items.length !== 3) {
     throw new Error("恢复后对比图谱数量不一致");
   }
   const recoveredExact = recoveredComparisons.items.find(
@@ -362,7 +448,10 @@ async function checkComparison(page) {
   const recoveredUncertain = recoveredComparisons.items.find(
     (item) => item.title === uncertain.title,
   );
-  if (!recoveredExact || !recoveredUncertain) {
+  const recoveredOpen = recoveredComparisons.items.find(
+    (item) => item.title === openComparison.title,
+  );
+  if (!recoveredExact || !recoveredUncertain || !recoveredOpen) {
     throw new Error("恢复后找不到原有对比图谱");
   }
   if (recoveredExact.summary.average_offset_days !== 4.5) {
@@ -377,6 +466,20 @@ async function checkComparison(page) {
     recoveredBloom.offset_max_days !== 8
   ) {
     throw new Error("恢复后区间偏移范围被丢弃或改写");
+  }
+  const recoveredOpenBloom = recoveredOpen.stage_offsets.find(
+    (row) => row.stage === "full_bloom",
+  );
+  if (
+    recoveredOpenBloom.offset_exact !== false ||
+    recoveredOpenBloom.offset_min_days !== null ||
+    recoveredOpenBloom.offset_max_days !== null ||
+    "offset_days" in recoveredOpenBloom
+  ) {
+    throw new Error("恢复后全开放偏移被误判损坏或被补成精确值");
+  }
+  if (!recoveredOpen.summary.sentence.includes("方向待定")) {
+    throw new Error("恢复后全开放比较不再返回方向待定");
   }
 }
 

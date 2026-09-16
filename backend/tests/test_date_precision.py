@@ -384,6 +384,80 @@ class OffsetRangeTests(unittest.TestCase):
         self.assertIsNone(summary["average_offset_days"])
         self.assertIn("偏移", summary["sentence"])
 
+    def test_same_direction_open_comparison_is_direction_unknown(self) -> None:
+        left = _observation()
+        right_season = create_observation_record(
+            {
+                "tree_id": "tree_season_b",
+                "season": "2026",
+                "observer": "测试观察员",
+                "note": "",
+            },
+            {"id": "tree_season_b", "plot_id": "plot_season", "status": "active"},
+            timestamp="2026-01-01T00:00:00+00:00",
+        )
+        left = _add(
+            left, "bud_burst", {"observed_on": "2026-03-10"}
+        )
+        left = _add(
+            left,
+            "full_bloom",
+            {"precision": "on_or_after", "observed_on": "2026-04-01"},
+        )
+        left = _add(left, "fruit_set", {"observed_on": "2026-04-18"})
+        left = _add(left, "harvest", {"observed_on": "2026-09-02"})
+        left = complete_observation_record(
+            left, expected_revision=left["revision"]
+        )
+        for stage, date_value in (
+            ("bud_burst", "2026-03-15"),
+            ("fruit_set", "2026-04-22"),
+            ("harvest", "2026-09-07"),
+        ):
+            right_season = _add(
+                right_season, stage, {"observed_on": date_value}
+            )
+        right_season = _add(
+            right_season,
+            "full_bloom",
+            {"precision": "on_or_after", "observed_on": "2026-04-05"},
+        )
+        right_season = complete_observation_record(
+            right_season, expected_revision=right_season["revision"]
+        )
+
+        rows = {
+            row["stage"]: row
+            for row in calculate_stage_offsets(left, right_season)
+        }
+        bloom = rows["full_bloom"]
+        self.assertFalse(bloom["offset_exact"])
+        self.assertIsNone(bloom["offset_min_days"])
+        self.assertIsNone(bloom["offset_max_days"])
+        self.assertNotIn("offset_days", bloom)
+        # 其余单日阶段仍精确。
+        self.assertTrue(rows["harvest"]["offset_exact"])
+        self.assertEqual(rows["harvest"]["offset_days"], 5)
+
+        record = create_comparison_record(
+            {
+                "title": "同方向开放",
+                "left_observation_id": left["id"],
+                "right_observation_id": right_season["id"],
+            },
+            left,
+            right_season,
+            None,
+            None,
+            timestamp="2026-09-10T00:00:00+00:00",
+        )
+        summary = record["summary"]
+        self.assertIsNone(summary["average_offset_days"])
+        self.assertIsNone(summary["minimum_offset_days"])
+        self.assertIsNone(summary["maximum_offset_days"])
+        self.assertIn("方向待定", summary["sentence"])
+        self.assertEqual(summary["exact_stage_count"], 3)
+
 
 class ServiceRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -489,6 +563,72 @@ class ServiceRecoveryTests(unittest.TestCase):
             recovered.open()
         self.assertEqual(raised.exception.code, "state_corrupt")
         recovered.close()
+
+    def test_same_direction_open_offsets_survive_recovery(self) -> None:
+        from app.persistence.snapshot import _check_comparison_record
+
+        def comparison_record(stage_rows: list[dict[str, object]]) -> dict[str, object]:
+            return {
+                "id": "atlas_open",
+                "stage_offsets": stage_rows,
+            }
+
+        open_row = {
+            "stage": "full_bloom",
+            "label": "盛花期",
+            "rank": 40,
+            "left_date": "2026-04-01",
+            "right_date": "2026-04-05",
+            "left_precision": "on_or_after",
+            "right_precision": "on_or_after",
+            "offset_min_days": None,
+            "offset_max_days": None,
+            "offset_exact": False,
+            "confidence_gap": 0,
+        }
+        exact_row = {
+            "stage": "harvest",
+            "label": "采收期",
+            "rank": 80,
+            "left_date": "2026-09-02",
+            "right_date": "2026-09-07",
+            "left_precision": "day",
+            "right_precision": "day",
+            "offset_days": 5,
+            "offset_min_days": 5,
+            "offset_max_days": 5,
+            "offset_exact": True,
+            "confidence_gap": 0,
+        }
+        # 全开放行与精确行混合是合法的，恢复校验必须接受。
+        _check_comparison_record(comparison_record([open_row, exact_row]))
+
+        # 历史比较只有 offset_days（三个新字段整体缺失）仍被接受。
+        legacy_row = {
+            "stage": "harvest",
+            "label": "采收期",
+            "rank": 80,
+            "left_date": "2026-09-02",
+            "right_date": "2026-09-07",
+            "offset_days": 5,
+            "confidence_gap": 0,
+        }
+        _check_comparison_record(comparison_record([legacy_row]))
+
+        # 不确定行携带虚构精确天数 -> 损坏。
+        corrupt_open = {**open_row, "offset_days": 3}
+        with self.assertRaises(DomainError):
+            _check_comparison_record(comparison_record([corrupt_open]))
+
+        # 只有一个边界字段（混合缺失）-> 损坏。
+        partial_row = {k: v for k, v in open_row.items() if k != "offset_max_days"}
+        with self.assertRaises(DomainError):
+            _check_comparison_record(comparison_record([partial_row]))
+
+        # 精确行的范围不一致 -> 损坏。
+        bad_exact = {**exact_row, "offset_max_days": 6}
+        with self.assertRaises(DomainError):
+            _check_comparison_record(comparison_record([bad_exact]))
 
     def _seed_tree(self, tree_id: str, plot_id: str) -> None:
         import json

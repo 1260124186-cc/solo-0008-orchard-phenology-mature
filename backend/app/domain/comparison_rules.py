@@ -162,18 +162,25 @@ def build_summary(
             all_lower_bounded=all_lower_bounded,
             all_upper_bounded=all_upper_bounded,
         )
-        stable_bounds = (
-            range_minimum is not None
-            and range_maximum is not None
-            and range_maximum - range_minimum <= 10
-        )
-        if stable_bounds:
-            stability = "阶段偏移区间较为集中"
+        # 存在同名阶段两边同方向开放（都“不早于”或都“不晚于”），
+        # 使整体偏移既无法给出下界也无法给出上界：方向待定，不虚构任何数字。
+        fully_open = range_minimum is None and range_maximum is None
+        if fully_open:
+            stability = "存在同方向开放边界，偏移方向无法确认，建议补充观察"
+            offset_clause = f"整体偏移方向待定，{direction}"
         else:
-            stability = "存在日期区间或边界记录，偏移范围较宽，建议复核记录"
-        offset_clause = (
-            f"整体偏移 {_format_offset_span(range_minimum, range_maximum)}，{direction}"
-        )
+            stable_bounds = (
+                range_minimum is not None
+                and range_maximum is not None
+                and range_maximum - range_minimum <= 10
+            )
+            if stable_bounds:
+                stability = "阶段偏移区间较为集中"
+            else:
+                stability = "存在日期区间或边界记录，偏移范围较宽，建议复核记录"
+            offset_clause = (
+                f"整体偏移 {_format_offset_span(range_minimum, range_maximum)}，{direction}"
+            )
 
     sentence = (
         f"{left_tree_label(left_tree)} 与 {right_tree_label(right_tree)} 在 "
