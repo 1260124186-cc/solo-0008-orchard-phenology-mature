@@ -315,6 +315,128 @@ class HttpFoundationTests(unittest.TestCase):
         )
         self.assertEqual(old_brief["basis_status"], "superseded")
 
+    def test_http_stage_replacement_correction(self) -> None:
+        headers = {"X-Actor-Id": "local-admin"}
+        _, plot = self._request(
+            "PUT",
+            "/plots",
+            {
+                "code": "OR-8301",
+                "name": "阶段替换 HTTP 园",
+                "locality": "测试地",
+                "cultivar_focus": "测试品种",
+                "steward": "测试组",
+                "planting_year": 2010,
+                "note": "",
+            },
+            headers,
+        )
+        _, left_tree = self._request(
+            "PUT",
+            "/trees",
+            {
+                "plot_id": plot["id"],
+                "code": "OR-8301-T01",
+                "cultivar": "秋梨",
+                "rootstock": "杜梨",
+                "planting_year": 2010,
+                "status": "active",
+                "note": "",
+            },
+            headers,
+        )
+        self._request(
+            "PUT",
+            f"/plots/{plot['id']}/confirm",
+            {"revision": plot["revision"]},
+            headers,
+        )
+
+        _, season = self._request(
+            "PUT",
+            "/observations",
+            {
+                "tree_id": left_tree["id"],
+                "season": "2026",
+                "observer": "HTTP 测试员",
+                "note": "",
+            },
+            headers,
+        )
+        for stage, observed_on in (
+            ("bud_burst", "2026-03-10"),
+            ("full_bloom", "2026-04-01"),
+            ("fruit_set", "2026-04-18"),
+            ("fruit_growth", "2026-05-20"),
+            ("harvest", "2026-09-02"),
+        ):
+            _, season = self._request(
+                "PUT",
+                f"/observations/{season['id']}/stages",
+                {
+                    "stage": stage,
+                    "observed_on": observed_on,
+                    "confidence": 4,
+                    "note": "",
+                    "revision": season["revision"],
+                },
+                headers,
+            )
+        _, season = self._request(
+            "PUT",
+            f"/observations/{season['id']}/complete",
+            {"revision": season["revision"]},
+            headers,
+        )
+
+        status, proposed = self._request(
+            "PUT",
+            "/corrections",
+            {
+                "observation_id": season["id"],
+                "reason": "该观察实为04-12落瓣期，被误记为果实膨大期",
+                "changes": [
+                    {
+                        "change_type": "replace",
+                        "stage": "fruit_growth",
+                        "correct_stage": "petal_fall",
+                        "observed_on": "2026-04-12",
+                        "confidence": 4,
+                        "note": "",
+                    }
+                ],
+            },
+            headers,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(proposed["changes"][0]["change_type"], "replace")
+
+        _, adopted = self._request(
+            "PUT",
+            f"/corrections/{proposed['id']}/adopt",
+            {"revision": proposed["revision"]},
+            headers,
+        )
+        self.assertEqual(adopted["status"], "adopted")
+
+        _, detail = self._request(
+            "GET",
+            f"/observations/{season['id']}",
+            None,
+            headers,
+        )
+        stages = [entry["stage"] for entry in detail["entries"]]
+        self.assertNotIn("fruit_growth", stages)
+        self.assertIn("petal_fall", stages)
+        self.assertEqual(
+            detail["entry_map"]["petal_fall"]["observed_on"],
+            "2026-04-12",
+        )
+        self.assertIn(
+            "fruit_growth",
+            [entry["stage"] for entry in detail["frozen_entries"]],
+        )
+
     def _request(
         self,
         method: str,

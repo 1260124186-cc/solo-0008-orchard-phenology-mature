@@ -55,18 +55,22 @@ export interface StageEntry {
   created_at: string;
 }
 
+export type CorrectionChangeType = "modify" | "replace";
+
 export interface EntryLineage {
   stage: string;
+  status: "unchanged" | "revised" | "replaced_out" | "replaced_in";
+  replacement_stage: string | null;
   frozen: {
     observed_on: string;
     confidence: number;
     note: string;
-  };
+  } | null;
   current: {
     observed_on: string;
     confidence: number;
     note: string;
-  };
+  } | null;
   revised: boolean;
   correction_id: string | null;
 }
@@ -99,6 +103,7 @@ export interface ObservationSummary {
   current_entries?: readonly StageEntry[];
   current_correction_id: string | null;
   current_correction_seq: number;
+  replaced_stage_count: number;
   has_corrections: boolean;
   proposed_correction_count: number;
   resolved_correction_count: number;
@@ -112,7 +117,9 @@ export type CorrectionStatus =
   | "withdrawn";
 
 export interface CorrectionChange {
+  change_type?: CorrectionChangeType;
   stage: string;
+  correct_stage?: string;
   observed_on?: string;
   confidence?: number;
   note?: string;

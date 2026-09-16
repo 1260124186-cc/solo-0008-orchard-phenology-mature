@@ -14,7 +14,7 @@ const workflow = valueAfter("--workflow");
 
 if (!workflow) {
   console.error(
-    "用法：node scripts/workflow_check.mjs --workflow catalog|observe|compare|correction",
+    "用法：node scripts/workflow_check.mjs --workflow catalog|observe|compare|correction|replacement",
   );
   process.exit(2);
 }
@@ -61,6 +61,8 @@ try {
     await checkComparison(page);
   } else if (workflow === "correction") {
     await checkCorrection(page);
+  } else if (workflow === "replacement") {
+    await checkStageReplacement(page);
   } else {
     throw new Error(`未知工作流：${workflow}`);
   }
@@ -405,6 +407,190 @@ async function checkCorrection(page) {
   );
   if (newBriefSeason.entry_map.harvest.observed_on !== "2026-09-05") {
     throw new Error("新简报未采用勘误后的当前事实");
+  }
+}
+
+async function seedSeasonWithStages(
+  plotCode,
+  plotName,
+  cultivar,
+  season,
+  stageEntries,
+) {
+  const { plot, tree } = await seedCatalog(plotCode, plotName, cultivar);
+  let observation = await api("/observations", "PUT", {
+    tree_id: tree.id,
+    season,
+    observer: "替换检查组",
+    note: "",
+  });
+  for (const [stage, observed_on, note = ""] of stageEntries) {
+    observation = await api(
+      `/observations/${observation.id}/stages`,
+      "PUT",
+      {
+        stage,
+        observed_on,
+        confidence: 4,
+        note,
+        revision: observation.revision,
+      },
+    );
+  }
+  observation = await api(
+    `/observations/${observation.id}/complete`,
+    "PUT",
+    { revision: observation.revision },
+  );
+  return { plot, tree, observation };
+}
+
+async function checkStageReplacement(page) {
+  // 左：05-20 被误记为果实膨大期，真值是 04-12 落瓣期
+  const { plot: leftPlot, observation: left } = await seedSeasonWithStages(
+    "OR-2502",
+    "北坞替换园",
+    "秋白梨",
+    "2026",
+    [
+      ["bud_burst", "2026-03-10"],
+      ["full_bloom", "2026-04-01"],
+      ["fruit_set", "2026-04-18"],
+      ["fruit_growth", "2026-05-20", "现场误录阶段"],
+      ["harvest", "2026-09-02"],
+    ],
+  );
+  const { observation: right } = await seedSeasonWithStages(
+    "OR-2501",
+    "南坞对照园",
+    "蜜香梨",
+    "2026",
+    [
+      ["bud_burst", "2026-03-15"],
+      ["full_bloom", "2026-04-05"],
+      ["petal_fall", "2026-04-15"],
+      ["fruit_set", "2026-04-22"],
+      ["harvest", "2026-09-07"],
+    ],
+  );
+  await api("/plots/" + leftPlot.id + "/briefs", "PUT", { title: "替换前简报" });
+  const comparisonBefore = await api("/comparisons", "PUT", {
+    title: "替换前对齐",
+    left_observation_id: left.id,
+    right_observation_id: right.id,
+  });
+
+  // 详情页：切换到“替换阶段”模式并提交、采纳
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator('[data-check="nav-observation"]').click();
+  await page
+    .locator('[data-check="observation-list-item"]', {
+      hasText: "OR-2502-T01",
+    })
+    .first()
+    .click();
+  await page.locator('[data-check="open-correction"]').click();
+  await page.locator('[data-check="correction-mode-replace"]').click();
+  await page.locator('[data-check="correction-stage"]').click();
+  await page.locator('[data-choice-value="fruit_growth"]').click();
+  await page.locator('[data-check="correction-correct-stage"]').click();
+  await page.locator('[data-choice-value="petal_fall"]').click();
+  await page.locator('[data-check="correction-date"]').fill("2026-04-12");
+  await page.locator('[data-check="correction-reason"]').fill(
+    "核对纸质台账，该观察实为落瓣期，被误选为果实膨大期",
+  );
+  await page.locator('[data-check="submit-correction"]').click();
+  await page.getByText("勘误已提交，等待受控采纳").waitFor();
+  await page.locator('[data-check="adopt-correction"]').click();
+  await page
+    .getByText("勘误已采纳：当前事实更新，原始结论保留为历史")
+    .waitFor();
+
+  // 当前轨道只出现正确阶段，谱系成对呈现
+  const movedOut = page
+    .locator('[data-stage="fruit_growth"][data-lineage-status="replaced_out"]');
+  await movedOut.waitFor();
+  const movedIn = page
+    .locator('[data-stage="petal_fall"][data-lineage-status="replaced_in"]');
+  await movedIn.waitFor();
+  const movedInText = await movedIn.innerText();
+  if (!movedInText.includes("2026-04-12")) {
+    throw new Error("替换进入的正确阶段未显示真值日期");
+  }
+
+  const afterDetail = await api(`/observations/${left.id}`);
+  const currentStages = afterDetail.entries.map((entry) => entry.stage);
+  if (currentStages.includes("fruit_growth")) {
+    throw new Error("当前轨道仍包含误录阶段");
+  }
+  if (currentStages.filter((stage) => stage === "petal_fall").length !== 1) {
+    throw new Error("正确阶段在当前轨道未恰好出现一次");
+  }
+  const frozenStages = afterDetail.frozen_entries.map((entry) => entry.stage);
+  if (!frozenStages.includes("fruit_growth") || frozenStages.includes("petal_fall")) {
+    throw new Error("原始冻结事实未保留误录阶段");
+  }
+
+  // 旧图谱冻结，隐式重算被拒绝，再显式接续
+  const oldComparison = await api(`/comparisons/${comparisonBefore.id}`);
+  if (oldComparison.basis_status !== "superseded") {
+    throw new Error("旧图谱未标记为历史世代");
+  }
+  const naive = await apiRaw("/comparisons", "PUT", {
+    title: "尝试悄悄重算",
+    left_observation_id: left.id,
+    right_observation_id: right.id,
+  });
+  if (naive.status !== 409) {
+    throw new Error("替换后隐式重算未被拒绝");
+  }
+  await page.locator('[data-check="nav-comparison"]').click();
+  await page.locator('[data-check="comparison-index-historical"]').first().waitFor();
+  await page.locator('[data-check="create-comparison"]').click();
+  await page.getByText("不能悄悄重算").waitFor();
+  await page.locator('[data-check="create-comparison"]').click();
+  await page.getByText("新版对比图谱已生成，旧图谱保留为历史事实").waitFor();
+
+  const comparisons = await api("/comparisons");
+  const currentOnes = comparisons.items.filter(
+    (item) => item.basis_status === "current",
+  );
+  if (currentOnes.length !== 1) {
+    throw new Error("替换后存在两套当前图谱");
+  }
+  const newOffsets = Object.fromEntries(
+    currentOnes[0].stage_offsets.map((item) => [item.stage, item.offset_days]),
+  );
+  if ("fruit_growth" in newOffsets || newOffsets.petal_fall !== 3) {
+    throw new Error("新版图谱未采用替换后的正确阶段");
+  }
+
+  // 简报：旧冻结、新采用
+  const oldBriefs = await api("/briefs");
+  const historicalBrief = oldBriefs.items.find(
+    (item) => item.basis_status === "superseded",
+  );
+  if (!historicalBrief) {
+    throw new Error("替换前简报未标记为历史");
+  }
+  await page.locator('[data-check="nav-brief"]').click();
+  await page.locator('[data-check="brief-plot"]').click();
+  await page.locator('[data-choice-value]:has-text("OR-2502")').click();
+  await page.locator('[data-check="create-brief"]').click();
+  await page.getByText("编研简报已生成并冻结").waitFor();
+  const briefs = await api("/briefs");
+  const currentBrief = briefs.items.find(
+    (item) => item.basis_status === "current",
+  );
+  const currentBriefDetail = await api(`/briefs/${currentBrief.id}`);
+  const currentLeft = currentBriefDetail.payload.observations.find(
+    (item) => item.id === left.id,
+  );
+  if (
+    !("petal_fall" in currentLeft.entry_map) ||
+    "fruit_growth" in currentLeft.entry_map
+  ) {
+    throw new Error("新版简报未采用替换后的正确阶段");
   }
 }
 

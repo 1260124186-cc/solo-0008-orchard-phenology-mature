@@ -7,7 +7,13 @@ from typing import Any
 
 from ..errors import ConflictError, PreconditionError, ValidationError
 from .plot_rules import new_identifier, now_iso, verify_revision
-from .stages import STAGE_BY_KEY, required_stage_keys, sort_stage_entries, stage_definition
+from .stages import (
+    STAGES,
+    STAGE_BY_KEY,
+    required_stage_keys,
+    sort_stage_entries,
+    stage_definition,
+)
 from .value_checks import (
     clean_confidence,
     clean_date,
@@ -241,38 +247,90 @@ def validate_stage_sequence(entries: list[dict[str, Any]]) -> None:
 
 
 def _entry_lineage(
-    frozen_entries: list[dict[str, Any]],
-    effective: list[dict[str, Any]],
-    correction_map: dict[str, str],
+    observation: dict[str, Any],
+    corrections: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    effective_index = {item["stage"]: item for item in effective}
+    from .correction_rules import adopted_chain, replay
+
+    frozen = sort_stage_entries(observation.get("entries", []))
+    frozen_index = {item["stage"]: item for item in frozen}
+    result = replay(observation, corrections)
+    effective_index = {item["stage"]: item for item in result["entries"]}
+    replaced_to = result["replaced_to"]
+    last_change = result["last_change"]
+
+    # 记录每个“进入当前事实的正确阶段”是由哪条勘误从哪个误录阶段替换而来。
+    introduced: dict[str, tuple[str, str]] = {}
+    for correction in adopted_chain(corrections, observation["id"]):
+        for change in correction["changes"]:
+            if change.get("change_type") == "replace":
+                introduced[change["correct_stage"]] = (
+                    change["stage"],
+                    correction["id"],
+                )
+
+    def snapshot(entry: dict[str, Any] | None) -> dict[str, Any] | None:
+        if entry is None:
+            return None
+        return {
+            "observed_on": entry["observed_on"],
+            "confidence": entry["confidence"],
+            "note": entry.get("note", ""),
+        }
+
     lineage: list[dict[str, Any]] = []
-    for frozen in frozen_entries:
-        stage = frozen["stage"]
-        current = effective_index.get(stage, frozen)
-        revised = (
-            current["observed_on"] != frozen["observed_on"]
-            or int(current["confidence"]) != int(frozen["confidence"])
-            or current.get("note", "") != frozen.get("note", "")
+    for frozen_entry in frozen:
+        stage = frozen_entry["stage"]
+        if stage in replaced_to:
+            target_stage = replaced_to[stage]
+            lineage.append(
+                {
+                    "stage": stage,
+                    "status": "replaced_out",
+                    "replacement_stage": target_stage,
+                    "frozen": snapshot(frozen_entry),
+                    "current": None,
+                    "revised": False,
+                    "correction_id": introduced.get(target_stage, (None, None))[1],
+                }
+            )
+            continue
+        current = effective_index.get(stage)
+        revised = current is not None and (
+            current["observed_on"] != frozen_entry["observed_on"]
+            or int(current["confidence"]) != int(frozen_entry["confidence"])
+            or current.get("note", "") != frozen_entry.get("note", "")
         )
         lineage.append(
             {
                 "stage": stage,
-                "frozen": {
-                    "observed_on": frozen["observed_on"],
-                    "confidence": frozen["confidence"],
-                    "note": frozen.get("note", ""),
-                },
-                "current": {
-                    "observed_on": current["observed_on"],
-                    "confidence": current["confidence"],
-                    "note": current.get("note", ""),
-                },
+                "status": "revised" if revised else "unchanged",
+                "replacement_stage": None,
+                "frozen": snapshot(frozen_entry),
+                "current": snapshot(current) or snapshot(frozen_entry),
                 "revised": revised,
-                "correction_id": correction_map.get(stage),
+                "correction_id": last_change.get(stage),
             }
         )
-    return lineage
+
+    for current_stage, (source_stage, correction_id) in introduced.items():
+        current = effective_index.get(current_stage)
+        lineage.append(
+            {
+                "stage": current_stage,
+                "status": "replaced_in",
+                "replacement_stage": source_stage,
+                "frozen": None,
+                "current": snapshot(current),
+                "revised": True,
+                "correction_id": correction_id,
+            }
+        )
+
+    return sorted(
+        lineage,
+        key=lambda item: STAGE_BY_KEY.get(item["stage"], STAGES[-1]).rank,
+    )
 
 
 def observation_summary(
@@ -291,10 +349,12 @@ def observation_summary(
     effective = effective_entries(observation, ledger)
     chain = adopted_chain(ledger, observation["id"])
     active_correction_id = current_correction_id(ledger, observation["id"])
-    correction_map: dict[str, str] = {}
-    for correction in chain:
-        for change in correction["changes"]:
-            correction_map[change["stage"]] = correction["id"]
+    replaced_stage_count = sum(
+        1
+        for correction in chain
+        for change in correction["changes"]
+        if change.get("change_type") == "replace"
+    )
     proposed = [
         item
         for item in ledger.values()
@@ -335,10 +395,11 @@ def observation_summary(
         "current_entries": effective,
         "current_correction_id": active_correction_id,
         "current_correction_seq": len(chain),
+        "replaced_stage_count": replaced_stage_count,
         "has_corrections": bool(chain),
         "proposed_correction_count": len(proposed),
         "resolved_correction_count": len(resolved),
-        "entry_lineage": _entry_lineage(frozen, effective, correction_map),
+        "entry_lineage": _entry_lineage(observation, ledger),
     }
 
 

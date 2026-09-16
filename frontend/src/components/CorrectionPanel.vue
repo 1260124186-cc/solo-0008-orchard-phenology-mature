@@ -12,7 +12,7 @@ import {
 } from "@lucide/vue";
 import ChoiceField from "./ChoiceField.vue";
 import { formatTimestamp } from "../domain/rules";
-import { stageLabel } from "../domain/stages";
+import { STAGES, stageLabel } from "../domain/stages";
 import type {
   CorrectionSummary,
   ObservationSummary,
@@ -28,13 +28,23 @@ const workspace = useWorkspace();
 const proposing = ref(false);
 const rejectTarget = ref<CorrectionSummary | null>(null);
 const form = reactive({
+  mode: "modify" as "modify" | "replace",
   stage: "",
+  correctStage: "",
   observedOn: "",
   confidence: "4",
   note: "",
   reason: "",
 });
 const formErrors = ref<string[]>([]);
+
+const effectiveIndex = computed(() => {
+  const map = new Map<string, StageEntry>();
+  for (const entry of props.observation.current_entries ?? []) {
+    map.set(entry.stage, entry);
+  }
+  return map;
+});
 
 const frozenIndex = computed(() => {
   const map = new Map<string, StageEntry>();
@@ -45,9 +55,16 @@ const frozenIndex = computed(() => {
 });
 
 const stageChoices = computed(() =>
-  Array.from(frozenIndex.value.values()).map((entry) => ({
+  Array.from(effectiveIndex.value.values()).map((entry) => ({
     value: entry.stage,
-    label: `${stageLabel(entry.stage)}（原 ${entry.observed_on}）`,
+    label: `${stageLabel(entry.stage)}（当前 ${entry.observed_on}）`,
+  })),
+);
+
+const correctStageChoices = computed(() =>
+  STAGES.filter((stage) => !effectiveIndex.value.has(stage.key)).map((stage) => ({
+    value: stage.key,
+    label: stageLabel(stage.key),
   })),
 );
 
@@ -80,17 +97,16 @@ const resolvedCorrections = computed(() =>
 
 function openProposal() {
   proposing.value = true;
+  form.mode = "modify";
   form.stage = stageChoices.value[0]?.value ?? "";
-  const entry = frozenIndex.value.get(form.stage);
-  form.observedOn = entry?.observed_on ?? "";
-  form.confidence = String(entry?.confidence ?? 4);
-  form.note = entry?.note ?? "";
+  form.correctStage = correctStageChoices.value[0]?.value ?? "";
+  syncOriginal();
   form.reason = "";
   formErrors.value = [];
 }
 
 function syncOriginal() {
-  const entry = frozenIndex.value.get(form.stage);
+  const entry = effectiveIndex.value.get(form.stage);
   if (entry) {
     form.observedOn = entry.observed_on;
     form.confidence = String(entry.confidence);
@@ -101,26 +117,42 @@ function syncOriginal() {
 async function submitProposal() {
   formErrors.value = [];
   if (!form.stage) formErrors.value.push("请选择需要修正的阶段");
+  if (form.mode === "replace" && !form.correctStage) {
+    formErrors.value.push("请选择正确的物候阶段");
+  }
+  if (form.mode === "replace" && form.correctStage === form.stage) {
+    formErrors.value.push("正确阶段必须与误录阶段不同");
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(form.observedOn)) {
-    formErrors.value.push("请填写合法的修正日期");
+    formErrors.value.push("请填写合法的观察日期");
   }
   if (form.reason.trim().length < 4) {
     formErrors.value.push("请用至少四个字说明修正依据");
   }
   if (formErrors.value.length) return;
+  const change =
+    form.mode === "replace"
+      ? {
+          change_type: "replace" as const,
+          stage: form.stage,
+          correct_stage: form.correctStage,
+          observed_on: form.observedOn,
+          confidence: Number(form.confidence),
+          note: form.note,
+        }
+      : {
+          change_type: "modify" as const,
+          stage: form.stage,
+          observed_on: form.observedOn,
+          confidence: Number(form.confidence),
+          note: form.note,
+        };
   const result = await workspace.runAction(
     () =>
       workspace.createCorrection({
         observation_id: props.observation.id,
         reason: form.reason,
-        changes: [
-          {
-            stage: form.stage,
-            observed_on: form.observedOn,
-            confidence: Number(form.confidence),
-            note: form.note,
-          },
-        ],
+        changes: [change],
       }),
     "勘误已提交，等待受控采纳",
   );
@@ -169,6 +201,14 @@ function statusLabel(status: CorrectionSummary["status"]): string {
   }[status];
 }
 
+function correctionTitle(correction: CorrectionSummary): string {
+  const isReplace = correction.changes.some(
+    (change) => change.change_type === "replace",
+  );
+  const stage = correction.changes[0]?.stage;
+  return isReplace && stage ? `${stageLabel(stage)} 阶段替换勘误` : `${stage ? stageLabel(stage) : ""} 勘误`;
+}
+
 function describeChange(change: CorrectionSummary["changes"][number]): string {
   const parts: string[] = [];
   if (change.observed_on) parts.push(`日期 → ${change.observed_on}`);
@@ -215,8 +255,29 @@ function describeChange(change: CorrectionSummary["changes"][number]): string {
       data-check="correction-form"
       @submit.prevent="submitProposal"
     >
+      <div class="correction-mode" role="radiogroup" aria-label="勘误类型">
+        <button
+          type="button"
+          class="correction-mode__option"
+          :class="{ 'is-active': form.mode === 'modify' }"
+          data-check="correction-mode-modify"
+          @click="form.mode = 'modify'"
+        >
+          修正日期 / 置信 / 说明
+        </button>
+        <button
+          type="button"
+          class="correction-mode__option"
+          :class="{ 'is-active': form.mode === 'replace' }"
+          data-check="correction-mode-replace"
+          @click="form.mode = 'replace'"
+        >
+          用正确阶段替换误录阶段
+        </button>
+      </div>
+
       <label>
-        <span>修正阶段</span>
+        <span>{{ form.mode === "replace" ? "误录阶段（将从当前轨道移除）" : "修正阶段" }}</span>
         <ChoiceField
           v-model="form.stage"
           data-check="correction-stage"
@@ -224,9 +285,20 @@ function describeChange(change: CorrectionSummary["changes"][number]): string {
           @update:model-value="syncOriginal"
         />
       </label>
+      <label v-if="form.mode === 'replace'">
+        <span>正确阶段（仅出现一次）</span>
+        <ChoiceField
+          v-model="form.correctStage"
+          data-check="correction-correct-stage"
+          :choices="correctStageChoices"
+          placeholder="请选择正确阶段"
+        />
+      </label>
       <div class="form-grid form-grid--two">
         <label>
-          <span>修正后的观察日期</span>
+          <span>{{
+            form.mode === "replace" ? "正确阶段的观察日期" : "修正后的观察日期"
+          }}</span>
           <input
             v-model="form.observedOn"
             data-check="correction-date"
@@ -243,12 +315,18 @@ function describeChange(change: CorrectionSummary["changes"][number]): string {
         </label>
       </div>
       <label>
-        <span>修正说明（可选）</span>
+        <span>{{
+          form.mode === "replace" ? "替换说明（可选）" : "修正说明（可选）"
+        }}</span>
         <input
           v-model="form.note"
           data-check="correction-note"
           maxlength="300"
-          placeholder="现场补充说明"
+          :placeholder="
+            form.mode === 'replace'
+              ? '例如：现场原始台账记录为落瓣期'
+              : '现场补充说明'
+          "
         />
       </label>
       <label>
@@ -258,9 +336,16 @@ function describeChange(change: CorrectionSummary["changes"][number]): string {
           data-check="correction-reason"
           rows="2"
           maxlength="300"
-          placeholder="例如：核对现场原始台账后确认日期登记偏早"
+          :placeholder="
+            form.mode === 'replace'
+              ? '例如：核对原始台账后确认该观察选错了物候阶段'
+              : '例如：核对现场原始台账后确认日期登记偏早'
+          "
         />
       </label>
+      <p v-if="form.mode === 'replace'" class="correction-form__hint">
+        采纳后误录阶段从当前事实移除、正确阶段只出现一次；原始阶段与日期仍保留在冻结事实中。必需阶段只能替换为另一个必需阶段。
+      </p>
       <div v-if="formErrors.length" class="form-errors">
         <span v-for="error in formErrors" :key="error">{{ error }}</span>
       </div>
@@ -308,8 +393,17 @@ function describeChange(change: CorrectionSummary["changes"][number]): string {
             v-for="change in correction.changes"
             :key="change.stage"
             class="correction-item__change"
+            :class="{ 'is-replacement': change.change_type === 'replace' }"
           >
-            {{ stageLabel(change.stage) }}：{{ describeChange(change) }}
+            <template v-if="change.change_type === 'replace'">
+              阶段替换：{{ stageLabel(change.stage) }}
+              <em class="correction-item__arrow">→</em>
+              {{ change.correct_stage ? stageLabel(change.correct_stage) : "" }}
+              （{{ change.observed_on }}）
+            </template>
+            <template v-else>
+              {{ stageLabel(change.stage) }}：{{ describeChange(change) }}
+            </template>
           </p>
           <small>{{ correction.proposed_by }} 提出 · {{ correction.decided_by }} 采纳</small>
         </li>
@@ -326,7 +420,7 @@ function describeChange(change: CorrectionSummary["changes"][number]): string {
       >
         <header>
           <CircleSlash :size="15" />
-          <strong>{{ stageLabel(correction.changes[0]?.stage) }} 勘误</strong>
+          <strong>{{ correctionTitle(correction) }}</strong>
           <span>{{ statusLabel(correction.status) }}</span>
         </header>
         <p class="correction-item__reason">{{ correction.reason }}</p>
@@ -334,8 +428,17 @@ function describeChange(change: CorrectionSummary["changes"][number]): string {
             v-for="change in correction.changes"
             :key="change.stage"
             class="correction-item__change"
+            :class="{ 'is-replacement': change.change_type === 'replace' }"
           >
-            {{ stageLabel(change.stage) }}：{{ describeChange(change) }}
+            <template v-if="change.change_type === 'replace'">
+              阶段替换：{{ stageLabel(change.stage) }}
+              <em class="correction-item__arrow">→</em>
+              {{ change.correct_stage ? stageLabel(change.correct_stage) : "" }}
+              （{{ change.observed_on }}）
+            </template>
+            <template v-else>
+              {{ stageLabel(change.stage) }}：{{ describeChange(change) }}
+            </template>
           </p>
         <small>{{ correction.proposed_by }} 提交于 {{ formatTimestamp(correction.proposed_at) }}</small>
         <div class="correction-item__actions">

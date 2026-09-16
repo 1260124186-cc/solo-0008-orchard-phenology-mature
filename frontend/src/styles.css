@@ -2623,3 +2623,73 @@ select {
     margin-left: 0;
   }
 }
+
+/* 阶段替换勘误 */
+.correction-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.correction-mode__option {
+  padding: 9px 10px;
+  border-radius: 9px;
+  border: 1px solid #d3c6a6;
+  background: #faf5ea;
+  color: #6f5f3c;
+  font-size: 0.83rem;
+  cursor: pointer;
+}
+
+.correction-mode__option.is-active {
+  background: #5f7a3d;
+  border-color: #5f7a3d;
+  color: #fff;
+}
+
+.correction-form__hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #8a6a3c;
+}
+
+.correction-item__change.is-replacement {
+  color: #7c4818;
+  font-weight: 600;
+}
+
+.correction-item__arrow {
+  font-style: normal;
+  color: #c98a3d;
+  margin: 0 4px;
+}
+
+.lineage-book__row.is-replaced-out {
+  background: #f7ece9;
+  opacity: 0.92;
+}
+
+.lineage-book__row.is-replaced-in {
+  background: #eef4e2;
+  box-shadow: inset 3px 0 0 #5f7a3d;
+}
+
+.lineage-book__row.is-revised {
+  background: #fdf4e6;
+}
+
+.lineage-book__moved {
+  color: #9c4a1f;
+}
+
+.lineage-book__note {
+  padding: 3px 14px 7px;
+  font-size: 0.74rem;
+  color: #8a6a3c;
+  background: #fdf9f1;
+}
+
+.lineage-book__row.is-replaced-in + .lineage-book__note,
+.lineage-book__row.is-replaced-out + .lineage-book__note {
+  background: transparent;
+}

@@ -696,6 +696,386 @@ class ControlledCorrectionTests(unittest.TestCase):
         }
 
 
+class StageReplacementTests(unittest.TestCase):
+    """受控勘误：用正确阶段整体替换误录阶段。"""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self.temporary.name)
+        self.database = Database(self.data_dir / "atlas.sqlite3")
+        self.repository = Repository(self.database)
+        self.repository.open()
+        self.catalog = CatalogService(self.repository)
+        self.observations = ObservationService(self.repository)
+        self.comparisons = ComparisonService(self.repository)
+        self.briefs = BriefService(self.repository)
+        self.corrections = CorrectionService(self.repository)
+        with _request("local-admin", "rep-plot-create"):
+            self.plot = self.catalog.create_plot(
+                {
+                    "code": "OR-6301",
+                    "name": "阶段替换测试园",
+                    "locality": "测试地点",
+                    "cultivar_focus": "测试品种",
+                    "steward": "测试组",
+                    "planting_year": 2010,
+                    "note": "",
+                }
+            )
+        with _request("local-admin", "rep-tree-left"):
+            self.tree_left = self.catalog.create_tree(
+                {
+                    "plot_id": self.plot["id"],
+                    "code": "OR-6301-T01",
+                    "cultivar": "秋梨",
+                    "rootstock": "杜梨",
+                    "planting_year": 2010,
+                    "status": "active",
+                    "note": "",
+                }
+            )
+        with _request("local-admin", "rep-tree-right"):
+            self.tree_right = self.catalog.create_tree(
+                {
+                    "plot_id": self.plot["id"],
+                    "code": "OR-6301-T02",
+                    "cultivar": "蜜梨",
+                    "rootstock": "杜梨",
+                    "planting_year": 2010,
+                    "status": "active",
+                    "note": "",
+                }
+            )
+        with _request("local-admin", "rep-plot-confirm"):
+            self.catalog.confirm_plot(
+                self.plot["id"],
+                expected_revision=self.plot["revision"],
+            )
+
+    def tearDown(self) -> None:
+        self.repository.close()
+        self.temporary.cleanup()
+
+    def _season(
+        self,
+        seed: str,
+        tree_id: str,
+        entries: list[tuple[str, str]],
+    ) -> dict[str, object]:
+        entries = sorted(entries, key=lambda item: item[1])
+        with _request("local-admin", f"rep-start-{seed}"):
+            record = self.observations.start_observation(
+                {
+                    "tree_id": tree_id,
+                    "season": "2026",
+                    "observer": "替换测试员",
+                    "note": "",
+                }
+            )
+        for index, (stage, observed_on) in enumerate(entries):
+            with _request("local-admin", f"rep-stage-{seed}-{index}"):
+                record = self.observations.add_stage(
+                    record["id"],
+                    {
+                        "stage": stage,
+                        "observed_on": observed_on,
+                        "confidence": 4,
+                        "note": "现场误录阶段"
+                        if seed == "left" and stage == "fruit_growth"
+                        else "",
+                        "revision": record["revision"],
+                    },
+                )
+        with _request("local-admin", f"rep-complete-{seed}"):
+            return self.observations.complete_observation(
+                record["id"],
+                {"revision": record["revision"]},
+            )
+
+    def _seed_pair(self) -> tuple[dict[str, object], dict[str, object]]:
+        # 左：05-20 被误记为果实膨大期，实际是 04-12 的落瓣期
+        left = self._season(
+            "left",
+            self.tree_left["id"],
+            [
+                ("bud_burst", "2026-03-10"),
+                ("full_bloom", "2026-04-01"),
+                ("fruit_set", "2026-04-18"),
+                ("fruit_growth", "2026-05-20"),
+                ("harvest", "2026-09-02"),
+            ],
+        )
+        right = self._season(
+            "right",
+            self.tree_right["id"],
+            [
+                ("bud_burst", "2026-03-15"),
+                ("full_bloom", "2026-04-05"),
+                ("petal_fall", "2026-04-15"),
+                ("fruit_set", "2026-04-22"),
+                ("harvest", "2026-09-07"),
+            ],
+        )
+        return left, right
+
+    def test_stage_replacement_moves_stage_once_and_keeps_original(self) -> None:
+        left, _ = self._seed_pair()
+        with _request("local-admin", "rep-propose"):
+            proposed = self.corrections.create_correction(
+                {
+                    "observation_id": left["id"],
+                    "reason": "该观察实为04-12落瓣期，被误记为05-20果实膨大期",
+                    "changes": [
+                        {
+                            "change_type": "replace",
+                            "stage": "fruit_growth",
+                            "correct_stage": "petal_fall",
+                            "observed_on": "2026-04-12",
+                            "confidence": 4,
+                            "note": "阶段更正为落瓣期",
+                        }
+                    ],
+                }
+            )
+        pending = self.observations.get_observation(left["id"])
+        self.assertIn("fruit_growth", pending["entry_map"])
+        self.assertNotIn("petal_fall", pending["entry_map"])
+
+        with _request(
+            "local-admin",
+            "rep-adopt",
+            request_path=f"/api/corrections/{proposed['id']}/adopt",
+            route_template="/api/corrections/{correction_id}/adopt",
+        ):
+            self.corrections.adopt_correction(
+                proposed["id"],
+                {"revision": proposed["revision"]},
+            )
+
+        detail = self.observations.get_observation(left["id"])
+        current_stages = [entry["stage"] for entry in detail["entries"]]
+        self.assertNotIn("fruit_growth", current_stages)
+        self.assertIn("petal_fall", current_stages)
+        self.assertEqual(
+            sum(1 for stage in current_stages if stage == "petal_fall"),
+            1,
+        )
+        self.assertEqual(detail["entry_map"]["petal_fall"]["observed_on"], "2026-04-12")
+
+        # 原始冻结事实仍完整保留误录阶段与日期。
+        frozen_stages = [entry["stage"] for entry in detail["frozen_entries"]]
+        self.assertIn("fruit_growth", frozen_stages)
+        self.assertNotIn("petal_fall", frozen_stages)
+
+        lineage = {line["stage"]: line for line in detail["entry_lineage"]}
+        self.assertEqual(lineage["fruit_growth"]["status"], "replaced_out")
+        self.assertEqual(lineage["fruit_growth"]["replacement_stage"], "petal_fall")
+        self.assertIsNone(lineage["fruit_growth"]["current"])
+        self.assertEqual(lineage["petal_fall"]["status"], "replaced_in")
+        self.assertEqual(lineage["petal_fall"]["replacement_stage"], "fruit_growth")
+        self.assertEqual(
+            lineage["petal_fall"]["current"]["observed_on"],
+            "2026-04-12",
+        )
+
+        # 季节志本体字节与修订号不变。
+        raw = self.repository.read()["observations"][left["id"]]
+        self.assertEqual(raw["revision"], left["revision"])
+        self.assertIn("fruit_growth", {entry["stage"] for entry in raw["entries"]})
+
+    def test_invalid_replacements_are_rejected(self) -> None:
+        left, _ = self._seed_pair()
+        cases = [
+            (
+                "正确阶段已存在",
+                {
+                    "change_type": "replace",
+                    "stage": "bud_burst",
+                    "correct_stage": "full_bloom",
+                    "observed_on": "2026-03-20",
+                },
+                "correction_target_stage_exists",
+            ),
+            (
+                "替换会移除必需阶段",
+                {
+                    "change_type": "replace",
+                    "stage": "harvest",
+                    "correct_stage": "leaf_fall",
+                    "observed_on": "2026-11-20",
+                },
+                "correction_required_stage_removed",
+            ),
+            (
+                "正确阶段与误录阶段相同",
+                {
+                    "change_type": "replace",
+                    "stage": "bud_burst",
+                    "correct_stage": "bud_burst",
+                    "observed_on": "2026-03-11",
+                },
+                "validation_error",
+            ),
+            (
+                "替换后违反阶段顺序",
+                {
+                    "change_type": "replace",
+                    "stage": "fruit_growth",
+                    "correct_stage": "petal_fall",
+                    "observed_on": "2026-05-20",
+                },
+                "validation_error",
+            ),
+        ]
+        for index, (_, change, code) in enumerate(cases):
+            with self.assertRaises(DomainError) as raised:
+                with _request("local-admin", f"rep-invalid-{index}"):
+                    self.corrections.create_correction(
+                        {
+                            "observation_id": left["id"],
+                            "reason": "非法替换用例",
+                            "changes": [change],
+                        }
+                    )
+            self.assertEqual(raised.exception.code, code)
+
+    def test_frozen_comparison_and_brief_keep_old_generation_after_replacement(
+        self,
+    ) -> None:
+        left, right = self._seed_pair()
+        with _request("local-admin", "rep-cmp-old"):
+            old_comparison = self.comparisons.create_comparison(
+                {
+                    "title": "替换前图谱",
+                    "left_observation_id": left["id"],
+                    "right_observation_id": right["id"],
+                }
+            )
+        with _request("local-admin", "rep-brief-old"):
+            old_brief = self.briefs.create_brief(
+                self.plot["id"],
+                {"title": "替换前简报"},
+            )
+        old_common = {
+            item["stage"]: item["offset_days"]
+            for item in old_comparison["stage_offsets"]
+        }
+        self.assertNotIn("petal_fall", old_common)
+        self.assertEqual(set(old_common), {
+            "bud_burst",
+            "full_bloom",
+            "fruit_set",
+            "harvest",
+        })
+
+        with _request("local-admin", "rep-create-2"):
+            proposed = self.corrections.create_correction(
+                {
+                    "observation_id": left["id"],
+                    "reason": "该观察实为04-12落瓣期，被误记为果实膨大期",
+                    "changes": [
+                        {
+                            "change_type": "replace",
+                            "stage": "fruit_growth",
+                            "correct_stage": "petal_fall",
+                            "observed_on": "2026-04-12",
+                            "confidence": 4,
+                        }
+                    ],
+                }
+            )
+        with _request(
+            "local-admin",
+            "rep-adopt-2",
+            request_path=f"/api/corrections/{proposed['id']}/adopt",
+            route_template="/api/corrections/{correction_id}/adopt",
+        ):
+            self.corrections.adopt_correction(
+                proposed["id"],
+                {"revision": proposed["revision"]},
+            )
+
+        frozen_comparison = self.comparisons.get_comparison(old_comparison["id"])
+        self.assertEqual(frozen_comparison["basis_status"], "superseded")
+        self.assertEqual(
+            {
+                item["stage"]: item["offset_days"]
+                for item in frozen_comparison["stage_offsets"]
+            },
+            old_common,
+        )
+
+        with self.assertRaises(ConflictError) as raised:
+            with _request("local-admin", "rep-cmp-naive"):
+                self.comparisons.create_comparison(
+                    {
+                        "title": "隐式重算",
+                        "left_observation_id": left["id"],
+                        "right_observation_id": right["id"],
+                    }
+                )
+        self.assertEqual(
+            raised.exception.code,
+            "comparison_basis_superseded",
+        )
+
+        with _request("local-admin", "rep-cmp-new"):
+            new_comparison = self.comparisons.create_comparison(
+                {
+                    "title": "替换后图谱",
+                    "left_observation_id": left["id"],
+                    "right_observation_id": right["id"],
+                    "supersedes_comparison_id": old_comparison["id"],
+                }
+            )
+        new_common = {
+            item["stage"]: item["offset_days"]
+            for item in new_comparison["stage_offsets"]
+        }
+        self.assertEqual(new_comparison["basis_status"], "current")
+        self.assertNotIn("fruit_growth", new_common)
+        self.assertIn("petal_fall", new_common)
+        self.assertEqual(new_common["petal_fall"], 3)
+        self.assertEqual(
+            self.comparisons.get_comparison(old_comparison["id"])[
+                "superseded_by_id"
+            ],
+            new_comparison["id"],
+        )
+
+        frozen_brief = self.briefs.get_brief(old_brief["id"])
+        self.assertEqual(frozen_brief["basis_status"], "superseded")
+        frozen_left = next(
+            item
+            for item in frozen_brief["payload"]["observations"]
+            if item["id"] == left["id"]
+        )
+        self.assertIn("fruit_growth", frozen_left["entry_map"])
+        self.assertNotIn("petal_fall", frozen_left["entry_map"])
+
+        with _request("local-admin", "rep-brief-new"):
+            new_brief = self.briefs.create_brief(
+                self.plot["id"],
+                {"title": "替换后简报"},
+            )
+        self.assertEqual(new_brief["basis_status"], "current")
+        new_left = next(
+            item
+            for item in new_brief["payload"]["observations"]
+            if item["id"] == left["id"]
+        )
+        self.assertIn("petal_fall", new_left["entry_map"])
+        self.assertNotIn("fruit_growth", new_left["entry_map"])
+
+        # 同一对季节志只能有一份当前图谱。
+        current = [
+            item
+            for item in self.comparisons.list_comparisons()["items"]
+            if item["basis_status"] == "current"
+        ]
+        self.assertEqual(len(current), 1)
+
+
 class JobQueueTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

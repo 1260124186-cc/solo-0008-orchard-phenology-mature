@@ -65,6 +65,7 @@ class CorrectionService:
             record = build_correction(
                 payload,
                 observation,
+                state.setdefault("corrections", {}),
                 actor_id=actor_id,
                 timestamp=now_iso(),
             )
