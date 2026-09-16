@@ -137,7 +137,9 @@
       "existing_state": "完成季节志只读",
       "iteration_goal": "支持带原因的历史更正",
       "observable_outcome": "更正不改变原版本或既有分析",
-      "overlap_exclusions": []
+      "overlap_exclusions": [],
+      "prompt_subject": "季节志历史更正",
+      "prompt_bank_selected": true
     },
     {
       "id": "tree-lifecycle",
@@ -145,7 +147,9 @@
       "existing_state": "植株一次性关闭",
       "iteration_goal": "支持原因、恢复和生命周期",
       "observable_outcome": "状态由事件时间线可追溯",
-      "overlap_exclusions": []
+      "overlap_exclusions": [],
+      "prompt_subject": "植株生命周期事件时间线",
+      "prompt_bank_selected": true
     },
     {
       "id": "plot-amendment",
@@ -153,7 +157,13 @@
       "existing_state": "确认园区只读",
       "iteration_goal": "支持版本化档案修订",
       "observable_outcome": "历史引用继续指向原版本",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "brief-versioning",
+        "rule-profile-evolution",
+        "comparison-source-drift"
+      ],
+      "prompt_subject": "园区档案版本化修订",
+      "prompt_bank_selected": false
     },
     {
       "id": "plot-code-cascade",
@@ -161,7 +171,9 @@
       "existing_state": "植株编号包含园区前缀",
       "iteration_goal": "园区编号变更时原子级联",
       "observable_outcome": "身份不变且历史编号可解释",
-      "overlap_exclusions": []
+      "overlap_exclusions": [],
+      "prompt_subject": "园区编号级联与历史映射",
+      "prompt_bank_selected": true
     },
     {
       "id": "stage-date-precision",
@@ -169,7 +181,9 @@
       "existing_state": "阶段日期为单日",
       "iteration_goal": "支持区间和边界精度",
       "observable_outcome": "比较不伪造精确中点",
-      "overlap_exclusions": []
+      "overlap_exclusions": [],
+      "prompt_subject": "阶段日期区间与边界精度",
+      "prompt_bank_selected": true
     },
     {
       "id": "stage-observation-state",
@@ -177,7 +191,9 @@
       "existing_state": "缺失阶段统一处理",
       "iteration_goal": "区分未观察、不适用和待核实",
       "observable_outcome": "完成结论显示状态依据",
-      "overlap_exclusions": []
+      "overlap_exclusions": [],
+      "prompt_subject": "阶段观察状态与完成依据",
+      "prompt_bank_selected": true
     },
     {
       "id": "rule-profile-evolution",
@@ -185,7 +201,13 @@
       "existing_state": "阶段规则固定",
       "iteration_goal": "支持版本化规则迁移",
       "observable_outcome": "历史结果继续使用原规则",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "plot-amendment",
+        "brief-versioning",
+        "comparison-source-drift"
+      ],
+      "prompt_subject": "阶段规则版本化",
+      "prompt_bank_selected": true
     },
     {
       "id": "multi-year-cohort",
@@ -193,7 +215,9 @@
       "existing_state": "比较限同一年",
       "iteration_goal": "支持多年队列和缺失机制",
       "observable_outcome": "纳入和排除都有可解释依据",
-      "overlap_exclusions": []
+      "overlap_exclusions": [],
+      "prompt_subject": "多年比较队列与缺失解释",
+      "prompt_bank_selected": true
     },
     {
       "id": "comparison-normalization",
@@ -201,7 +225,11 @@
       "existing_state": "比较固定原始日期",
       "iteration_goal": "支持基准交换和归一化",
       "observable_outcome": "口径变化确定性重算",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "comparison-source-drift"
+      ],
+      "prompt_subject": "比较口径归一化",
+      "prompt_bank_selected": true
     },
     {
       "id": "comparison-source-drift",
@@ -209,7 +237,13 @@
       "existing_state": "比较保存后无漂移说明",
       "iteration_goal": "检查来源版本和影响阶段",
       "observable_outcome": "旧比较冻结且新派生可追踪",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "comparison-normalization",
+        "brief-versioning",
+        "environment-correction"
+      ],
+      "prompt_subject": "比较来源漂移追踪",
+      "prompt_bank_selected": false
     },
     {
       "id": "brief-versioning",
@@ -217,7 +251,13 @@
       "existing_state": "简报只有单次输出",
       "iteration_goal": "支持版本列表和来源差异",
       "observable_outcome": "历史简报不从最新档案补值",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "plot-amendment",
+        "rule-profile-evolution",
+        "comparison-source-drift"
+      ],
+      "prompt_subject": "简报版本与来源冻结",
+      "prompt_bank_selected": true
     },
     {
       "id": "observer-identity",
@@ -225,7 +265,13 @@
       "existing_state": "观察者为自由文本",
       "iteration_goal": "建立身份连续性和署名快照",
       "observable_outcome": "改名合并后归因仍可追溯",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "duplicate-entity-merge",
+        "tree-lineage",
+        "cultivar-identity"
+      ],
+      "prompt_subject": "观察者身份连续性",
+      "prompt_bank_selected": false
     },
     {
       "id": "tree-lineage",
@@ -233,7 +279,13 @@
       "existing_state": "植株来源为自由文本",
       "iteration_goal": "支持多代谱系和来源可信度",
       "observable_outcome": "无环且历史身份可追溯",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "observer-identity",
+        "cultivar-identity",
+        "duplicate-entity-merge"
+      ],
+      "prompt_subject": "植株谱系追踪",
+      "prompt_bank_selected": false
     },
     {
       "id": "cultivar-identity",
@@ -241,7 +293,13 @@
       "existing_state": "品种为自由文本",
       "iteration_goal": "建立品种名录和别名归并",
       "observable_outcome": "归并拆分不破坏历史结论",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "observer-identity",
+        "tree-lineage",
+        "duplicate-entity-merge"
+      ],
+      "prompt_subject": "品种名录与别名归并",
+      "prompt_bank_selected": false
     },
     {
       "id": "duplicate-entity-merge",
@@ -249,7 +307,13 @@
       "existing_state": "重复档案无合并流程",
       "iteration_goal": "支持引用重映射和恢复",
       "observable_outcome": "所有分析只指向保留身份",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "observer-identity",
+        "tree-lineage",
+        "cultivar-identity"
+      ],
+      "prompt_subject": "重复档案合并与引用重映射",
+      "prompt_bank_selected": false
     },
     {
       "id": "sample-chain",
@@ -257,7 +321,11 @@
       "existing_state": "样本与阶段没有流转链",
       "iteration_goal": "支持分装检测和处置",
       "observable_outcome": "来源闭包和数量守恒可验证",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "evidence-lifecycle"
+      ],
+      "prompt_subject": "样本来源链与数量守恒",
+      "prompt_bank_selected": true
     },
     {
       "id": "environment-correction",
@@ -265,7 +333,12 @@
       "existing_state": "环境背景未建模",
       "iteration_goal": "支持事件更正和上下文冻结",
       "observable_outcome": "旧分析不被补录改写",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "comparison-source-drift",
+        "brief-versioning"
+      ],
+      "prompt_subject": "环境上下文更正与冻结",
+      "prompt_bank_selected": false
     },
     {
       "id": "evidence-lifecycle",
@@ -273,7 +346,11 @@
       "existing_state": "阶段没有证据生命周期",
       "iteration_goal": "支持摘要校验引用和失效",
       "observable_outcome": "损坏证据不破坏其他档案",
-      "overlap_exclusions": []
+      "overlap_exclusions": [
+        "sample-chain"
+      ],
+      "prompt_subject": "证据生命周期",
+      "prompt_bank_selected": false
     },
     {
       "id": "job-fairness",
@@ -281,7 +358,9 @@
       "existing_state": "任务队列无公平策略",
       "iteration_goal": "支持配额老化背压和暂停",
       "observable_outcome": "任务等待和执行有上限",
-      "overlap_exclusions": []
+      "overlap_exclusions": [],
+      "prompt_subject": "任务队列公平调度",
+      "prompt_bank_selected": true
     },
     {
       "id": "query-projection",
@@ -289,7 +368,9 @@
       "existing_state": "查询依赖内存过滤",
       "iteration_goal": "支持投影游标和一致性级别",
       "observable_outcome": "分页稳定且授权变化不越权",
-      "overlap_exclusions": []
+      "overlap_exclusions": [],
+      "prompt_subject": "查询投影与一致性",
+      "prompt_bank_selected": true
     }
   ]
 }
