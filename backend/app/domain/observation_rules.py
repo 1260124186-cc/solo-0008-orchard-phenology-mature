@@ -250,24 +250,16 @@ def _entry_lineage(
     observation: dict[str, Any],
     corrections: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    from .correction_rules import adopted_chain, replay
+    from .correction_rules import replay
 
     frozen = sort_stage_entries(observation.get("entries", []))
     frozen_index = {item["stage"]: item for item in frozen}
     result = replay(observation, corrections)
     effective_index = {item["stage"]: item for item in result["entries"]}
+    hops = result["hops"]
     replaced_to = result["replaced_to"]
+    replaced_from = result["replaced_from"]
     last_change = result["last_change"]
-
-    # 记录每个“进入当前事实的正确阶段”是由哪条勘误从哪个误录阶段替换而来。
-    introduced: dict[str, tuple[str, str]] = {}
-    for correction in adopted_chain(corrections, observation["id"]):
-        for change in correction["changes"]:
-            if change.get("change_type") == "replace":
-                introduced[change["correct_stage"]] = (
-                    change["stage"],
-                    correction["id"],
-                )
 
     def snapshot(entry: dict[str, Any] | None) -> dict[str, Any] | None:
         if entry is None:
@@ -278,20 +270,27 @@ def _entry_lineage(
             "note": entry.get("note", ""),
         }
 
+    # 每个阶段进入当前事实时的事实快照与勘误（沿 hops 回溯到最后一跳）。
+    introduced_at: dict[str, dict[str, Any]] = {}
+    for hop in hops:
+        introduced_at[hop["to_stage"]] = hop
+
     lineage: list[dict[str, Any]] = []
     for frozen_entry in frozen:
         stage = frozen_entry["stage"]
         if stage in replaced_to:
-            target_stage = replaced_to[stage]
             lineage.append(
                 {
                     "stage": stage,
                     "status": "replaced_out",
-                    "replacement_stage": target_stage,
+                    "replacement_stage": replaced_to[stage],
+                    "replaced_from_stage": None,
                     "frozen": snapshot(frozen_entry),
                     "current": None,
                     "revised": False,
-                    "correction_id": introduced.get(target_stage, (None, None))[1],
+                    "correction_id": introduced_at.get(replaced_to[stage], {}).get(
+                        "correction_id"
+                    ),
                 }
             )
             continue
@@ -306,6 +305,7 @@ def _entry_lineage(
                 "stage": stage,
                 "status": "revised" if revised else "unchanged",
                 "replacement_stage": None,
+                "replaced_from_stage": None,
                 "frozen": snapshot(frozen_entry),
                 "current": snapshot(current) or snapshot(frozen_entry),
                 "revised": revised,
@@ -313,24 +313,59 @@ def _entry_lineage(
             }
         )
 
-    for current_stage, (source_stage, correction_id) in introduced.items():
-        current = effective_index.get(current_stage)
+    # 由替换进入的阶段（含连续替换中的中间阶段）。
+    for stage, source_stage in replaced_from.items():
+        incoming = introduced_at.get(stage)
+        is_final = stage in effective_index
+        current = effective_index.get(stage)
         lineage.append(
             {
-                "stage": current_stage,
-                "status": "replaced_in",
-                "replacement_stage": source_stage,
+                "stage": stage,
+                "status": "replaced_in" if is_final else "replaced_transit",
+                "replacement_stage": replaced_to.get(stage),
+                "replaced_from_stage": source_stage,
                 "frozen": None,
                 "current": snapshot(current),
                 "revised": True,
-                "correction_id": correction_id,
+                "correction_id": incoming.get("correction_id") if incoming else None,
             }
         )
 
+    # 阶段按物候顺序排列；相同阶段不会重复，连续替换的中间阶段也各占一行。
     return sorted(
         lineage,
-        key=lambda item: STAGE_BY_KEY.get(item["stage"], STAGES[-1]).rank,
+        key=lambda item: (
+            STAGE_BY_KEY.get(item["stage"], STAGES[-1]).rank,
+            0 if item["status"] in {"unchanged", "replaced_out", "revised"} else 1,
+        ),
     )
+
+
+def _replacement_chain(
+    observation: dict[str, Any],
+    corrections: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """按采纳顺序返回每次替换的“移出 → 进入”两跳视图。"""
+    from .correction_rules import replay
+
+    result = replay(observation, corrections)
+    chain: list[dict[str, Any]] = []
+    for index, hop in enumerate(result["hops"], start=1):
+        chain.append(
+            {
+                "seq": index,
+                "from_stage": hop["from_stage"],
+                "to_stage": hop["to_stage"],
+                "observed_on": hop["observed_on"],
+                "confidence": hop["confidence"],
+                "note": hop.get("note", ""),
+                "correction_id": hop["correction_id"],
+                "adoption_seq": hop["adoption_seq"],
+                "adopted_at": hop["adopted_at"],
+                "to_still_current": hop["to_stage"] not in result["replaced_to"],
+            }
+        )
+    return chain
 
 
 def observation_summary(
@@ -400,6 +435,7 @@ def observation_summary(
         "proposed_correction_count": len(proposed),
         "resolved_correction_count": len(resolved),
         "entry_lineage": _entry_lineage(observation, ledger),
+        "replacement_chain": _replacement_chain(observation, ledger),
     }
 
 

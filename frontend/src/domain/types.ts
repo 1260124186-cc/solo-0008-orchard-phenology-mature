@@ -59,8 +59,14 @@ export type CorrectionChangeType = "modify" | "replace";
 
 export interface EntryLineage {
   stage: string;
-  status: "unchanged" | "revised" | "replaced_out" | "replaced_in";
+  status:
+    | "unchanged"
+    | "revised"
+    | "replaced_out"
+    | "replaced_in"
+    | "replaced_transit";
   replacement_stage: string | null;
+  replaced_from_stage: string | null;
   frozen: {
     observed_on: string;
     confidence: number;
@@ -73,6 +79,19 @@ export interface EntryLineage {
   } | null;
   revised: boolean;
   correction_id: string | null;
+}
+
+export interface ReplacementHop {
+  seq: number;
+  from_stage: string;
+  to_stage: string;
+  observed_on: string;
+  confidence: number;
+  note: string;
+  correction_id: string;
+  adoption_seq: number;
+  adopted_at: string | null;
+  to_still_current: boolean;
 }
 
 export interface ObservationSummary {
@@ -108,6 +127,7 @@ export interface ObservationSummary {
   proposed_correction_count: number;
   resolved_correction_count: number;
   entry_lineage?: readonly EntryLineage[];
+  replacement_chain?: readonly ReplacementHop[];
 }
 
 export type CorrectionStatus =

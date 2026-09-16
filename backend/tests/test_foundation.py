@@ -872,11 +872,20 @@ class StageReplacementTests(unittest.TestCase):
         self.assertEqual(lineage["fruit_growth"]["replacement_stage"], "petal_fall")
         self.assertIsNone(lineage["fruit_growth"]["current"])
         self.assertEqual(lineage["petal_fall"]["status"], "replaced_in")
-        self.assertEqual(lineage["petal_fall"]["replacement_stage"], "fruit_growth")
+        self.assertIsNone(lineage["petal_fall"]["replacement_stage"])
+        self.assertEqual(
+            lineage["petal_fall"]["replaced_from_stage"],
+            "fruit_growth",
+        )
         self.assertEqual(
             lineage["petal_fall"]["current"]["observed_on"],
             "2026-04-12",
         )
+        chain = detail["replacement_chain"]
+        self.assertEqual(len(chain), 1)
+        self.assertEqual(chain[0]["from_stage"], "fruit_growth")
+        self.assertEqual(chain[0]["to_stage"], "petal_fall")
+        self.assertTrue(chain[0]["to_still_current"])
 
         # 季节志本体字节与修订号不变。
         raw = self.repository.read()["observations"][left["id"]]
@@ -938,6 +947,109 @@ class StageReplacementTests(unittest.TestCase):
                         }
                     )
             self.assertEqual(raised.exception.code, code)
+
+    def test_consecutive_replacements_keep_full_chain_for_intermediate_stage(
+        self,
+    ) -> None:
+        left, _ = self._seed_pair()
+
+        def propose_and_adopt(key: str, source: str, target: str, observed_on: str):
+            with _request("local-admin", f"{key}-create"):
+                proposal = self.corrections.create_correction(
+                    {
+                        "observation_id": left["id"],
+                        "reason": f"{source} 实为 {target} 的连续替换",
+                        "changes": [
+                            {
+                                "change_type": "replace",
+                                "stage": source,
+                                "correct_stage": target,
+                                "observed_on": observed_on,
+                                "confidence": 4,
+                                "note": "",
+                            }
+                        ],
+                    }
+                )
+            with _request(
+                "local-admin",
+                f"{key}-adopt",
+                request_path=f"/api/corrections/{proposal['id']}/adopt",
+                route_template="/api/corrections/{correction_id}/adopt",
+            ):
+                return proposal, self.corrections.adopt_correction(
+                    proposal["id"],
+                    {"revision": proposal["revision"]},
+                )
+
+        # 第一跳：fruit_growth(05-20) -> petal_fall(04-12)
+        first_proposal, _ = propose_and_adopt(
+            "rep-chain-1",
+            "fruit_growth",
+            "petal_fall",
+            "2026-04-12",
+        )
+        after_first = self.observations.get_observation(left["id"])
+        self.assertIn("petal_fall", after_first["entry_map"])
+        self.assertNotIn("fruit_growth", after_first["entry_map"])
+
+        # 第二跳：petal_fall(04-12) -> bud_swell(03-05)
+        second_proposal, _ = propose_and_adopt(
+            "rep-chain-2",
+            "petal_fall",
+            "bud_swell",
+            "2026-03-05",
+        )
+        detail = self.observations.get_observation(left["id"])
+
+        # 当前轨道只保留最终阶段 bud_swell，且只出现一次。
+        current_stages = [entry["stage"] for entry in detail["entries"]]
+        self.assertIn("bud_swell", current_stages)
+        self.assertNotIn("petal_fall", current_stages)
+        self.assertNotIn("fruit_growth", current_stages)
+        self.assertEqual(
+            sum(1 for stage in current_stages if stage == "bud_swell"),
+            1,
+        )
+        self.assertEqual(detail["entry_map"]["bud_swell"]["observed_on"], "2026-03-05")
+
+        # 替换链完整串起两跳。
+        chain = detail["replacement_chain"]
+        self.assertEqual([hop["seq"] for hop in chain], [1, 2])
+        self.assertEqual(
+            [(hop["from_stage"], hop["to_stage"]) for hop in chain],
+            [("fruit_growth", "petal_fall"), ("petal_fall", "bud_swell")],
+        )
+        self.assertFalse(chain[0]["to_still_current"])
+        self.assertTrue(chain[1]["to_still_current"])
+        self.assertEqual(chain[0]["correction_id"], first_proposal["id"])
+        self.assertEqual(chain[1]["correction_id"], second_proposal["id"])
+
+        # 谱系中三个阶段都能定位：起点移出、中间阶段既进入又移出、终点进入。
+        lineage = {line["stage"]: line for line in detail["entry_lineage"]}
+        self.assertEqual(lineage["fruit_growth"]["status"], "replaced_out")
+        self.assertEqual(lineage["fruit_growth"]["replacement_stage"], "petal_fall")
+        self.assertEqual(lineage["petal_fall"]["status"], "replaced_transit")
+        self.assertEqual(
+            lineage["petal_fall"]["replaced_from_stage"],
+            "fruit_growth",
+        )
+        self.assertEqual(lineage["petal_fall"]["replacement_stage"], "bud_swell")
+        self.assertIsNone(lineage["petal_fall"]["current"])
+        self.assertIsNone(lineage["petal_fall"]["frozen"])
+        self.assertEqual(lineage["bud_swell"]["status"], "replaced_in")
+        self.assertEqual(lineage["bud_swell"]["replaced_from_stage"], "petal_fall")
+        self.assertIsNone(lineage["bud_swell"]["replacement_stage"])
+        self.assertEqual(
+            lineage["bud_swell"]["current"]["observed_on"],
+            "2026-03-05",
+        )
+
+        # 冻结事实仍是最初误录阶段。
+        self.assertIn(
+            "fruit_growth",
+            {entry["stage"] for entry in detail["frozen_entries"]},
+        )
 
     def test_frozen_comparison_and_brief_keep_old_generation_after_replacement(
         self,

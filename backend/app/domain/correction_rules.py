@@ -108,9 +108,14 @@ def _apply_change_set(
     *,
     correction_id: str,
     correction_timestamp: str,
-) -> dict[str, str]:
-    """把一条勘误的全部变更叠加到工作集，返回被替换阶段的去向映射。"""
-    replaced_to: dict[str, str] = {}
+    adoption_seq: int,
+) -> list[dict[str, Any]]:
+    """把一条勘误的全部变更叠加到工作集，返回本次产生的替换跳。
+
+    每个替换跳记录移出阶段、进入阶段、进入日期、勘误标识与其在勘误链中的
+    序号；连续替换时中间阶段既是某次的“进入”，也是下一次的“移出”。
+    """
+    hops: list[dict[str, Any]] = []
     for change in changes:
         if change.get("change_type", MODIFY) == MODIFY:
             if change["stage"] not in entries:
@@ -145,8 +150,19 @@ def _apply_change_set(
             "note": change.get("note", source.get("note", "")),
             "created_at": correction_timestamp,
         }
-        replaced_to[source_key] = target_key
-    return replaced_to
+        hops.append(
+            {
+                "from_stage": source_key,
+                "to_stage": target_key,
+                "observed_on": change["observed_on"],
+                "confidence": entries[target_key]["confidence"],
+                "note": entries[target_key].get("note", ""),
+                "correction_id": correction_id,
+                "adoption_seq": adoption_seq,
+                "adopted_at": correction_timestamp,
+            }
+        )
+    return hops
 
 
 def replay(
@@ -155,38 +171,54 @@ def replay(
     *,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """从冻结事实回放勘误链，得到当前生效事实与谱系信息。
+    """从冻结事实回放勘误链，得到当前生效事实与完整谱系信息。
 
-    返回 ``entries``（当前阶段条目）、``replaced_to``（阶段替换去向）、
-    ``last_change``（每个当前阶段最近一次修改它的勘误）。
+    返回：
+    - ``entries``：当前阶段条目；
+    - ``hops``：按采纳顺序排列的全部阶段替换跳（含中间阶段的进出）；
+    - ``replaced_to`` / ``replaced_from``：阶段去向/来源映射；
+    - ``last_change``：每个当前阶段最近一次修改它的勘误。
     """
     entries = {item["stage"]: dict(item) for item in frozen_entries(observation)}
+    hops: list[dict[str, Any]] = []
     replaced_to: dict[str, str] = {}
+    replaced_from: dict[str, str] = {}
     last_change: dict[str, str] = {}
     for correction in adopted_chain(corrections, observation["id"]):
-        hops = _apply_change_set(
+        new_hops = _apply_change_set(
             entries,
             correction["changes"],
             correction_id=correction["id"],
             correction_timestamp=correction.get("adopted_at")
             or correction["proposed_at"],
+            adoption_seq=int(correction.get("adoption_seq") or 0),
         )
-        replaced_to.update(hops)
+        hops.extend(new_hops)
+        for hop in new_hops:
+            replaced_to[hop["from_stage"]] = hop["to_stage"]
+            replaced_from[hop["to_stage"]] = hop["from_stage"]
         for change in correction["changes"]:
-            if change["change_type"] == REPLACE:
+            if change.get("change_type", MODIFY) == REPLACE:
                 last_change[change["correct_stage"]] = correction["id"]
             else:
                 last_change[change["stage"]] = correction["id"]
     if extra is not None:
+        extra_seq = 1 + max(
+            (int(item.get("adoption_seq") or 0) for item in hops),
+            default=0,
+        )
         _apply_change_set(
             entries,
             extra["changes"],
             correction_id=extra["id"],
             correction_timestamp=extra.get("proposed_at") or now_iso(),
+            adoption_seq=extra_seq,
         )
     return {
         "entries": sort_stage_entries(list(entries.values())),
+        "hops": hops,
         "replaced_to": replaced_to,
+        "replaced_from": replaced_from,
         "last_change": last_change,
     }
 

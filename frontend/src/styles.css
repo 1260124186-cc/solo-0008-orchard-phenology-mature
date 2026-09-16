@@ -2693,3 +2693,93 @@ select {
 .lineage-book__row.is-replaced-out + .lineage-book__note {
   background: transparent;
 }
+
+/* 阶段替换链 */
+.replacement-flow {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #cdd7bb;
+  border-radius: 12px;
+  background: #f5f9ef;
+}
+
+.replacement-flow h5 {
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: #47602e;
+}
+
+.replacement-flow ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.replacement-flow__hop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid #dde5cd;
+}
+
+.replacement-flow__hop.is-final {
+  border-color: #7d9a55;
+  background: #f1f7e8;
+}
+
+.replacement-flow__seq {
+  font-size: 0.74rem;
+  color: #7a8560;
+  background: #eef2e4;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.replacement-flow__from {
+  color: #9c5a2c;
+  text-decoration: line-through;
+  text-decoration-color: rgba(156, 90, 44, 0.45);
+}
+
+.replacement-flow__to {
+  font-weight: 700;
+  color: #47602e;
+}
+
+.replacement-flow__date {
+  color: #5f6b48;
+}
+
+.replacement-flow__final {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 0.74rem;
+  color: #47602e;
+  background: #dcebc8;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+.replacement-flow__transit {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 0.74rem;
+  color: #8a6a3c;
+  background: #f3e8d2;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+.lineage-book__row.is-replaced-transit {
+  background: #f3ecdd;
+}

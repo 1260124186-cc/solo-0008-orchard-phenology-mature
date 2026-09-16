@@ -446,7 +446,7 @@ async function seedSeasonWithStages(
 }
 
 async function checkStageReplacement(page) {
-  // 左：05-20 被误记为果实膨大期，真值是 04-12 落瓣期
+  // 左：05-20 被误记为果实膨大期，先订正为 04-12 落瓣期，再订正为 03-05 芽膨大期
   const { plot: leftPlot, observation: left } = await seedSeasonWithStages(
     "OR-2502",
     "北坞替换园",
@@ -466,6 +466,7 @@ async function checkStageReplacement(page) {
     "蜜香梨",
     "2026",
     [
+      ["bud_swell", "2026-03-08"],
       ["bud_burst", "2026-03-15"],
       ["full_bloom", "2026-04-05"],
       ["petal_fall", "2026-04-15"],
@@ -480,7 +481,6 @@ async function checkStageReplacement(page) {
     right_observation_id: right.id,
   });
 
-  // 详情页：切换到“替换阶段”模式并提交、采纳
   await page.reload({ waitUntil: "networkidle" });
   await page.locator('[data-check="nav-observation"]').click();
   await page
@@ -489,46 +489,117 @@ async function checkStageReplacement(page) {
     })
     .first()
     .click();
-  await page.locator('[data-check="open-correction"]').click();
-  await page.locator('[data-check="correction-mode-replace"]').click();
-  await page.locator('[data-check="correction-stage"]').click();
-  await page.locator('[data-choice-value="fruit_growth"]').click();
-  await page.locator('[data-check="correction-correct-stage"]').click();
-  await page.locator('[data-choice-value="petal_fall"]').click();
-  await page.locator('[data-check="correction-date"]').fill("2026-04-12");
-  await page.locator('[data-check="correction-reason"]').fill(
+
+  const stageNames = {
+    bud_swell: "芽膨大期",
+    bud_burst: "萌芽期",
+    first_bloom: "初花期",
+    full_bloom: "盛花期",
+    petal_fall: "落瓣期",
+    fruit_set: "坐果期",
+    fruit_growth: "果实膨大期",
+    harvest: "采收期",
+    leaf_fall: "落叶期",
+  };
+
+  async function replaceStage(source, target, observedOn, reason, expectedHops) {
+    await page.locator('[data-check="open-correction"]').click();
+    await page.locator('[data-check="correction-mode-replace"]').click();
+    await page.locator('[data-check="correction-stage"]').click();
+    await page.locator(`[data-choice-value="${source}"]`).click();
+    await page.locator('[data-check="correction-correct-stage"]').click();
+    await page.locator(`[data-choice-value="${target}"]`).click();
+    await page.locator('[data-check="correction-date"]').fill(observedOn);
+    await page.locator('[data-check="correction-reason"]').fill(reason);
+    await page.locator('[data-check="submit-correction"]').click();
+    // 等待新的待决勘误真正出现（卡片包含正确阶段的中文名与日期）
+    await page
+      .locator('[data-check="correction-pending-item"]')
+      .filter({ hasText: stageNames[target] })
+      .filter({ hasText: observedOn })
+      .first()
+      .waitFor();
+    await page.locator('[data-check="adopt-correction"]').click();
+    // 以服务端替换链长度作为采纳落地的判据
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const detail = await api(`/observations/${left.id}`);
+      if (detail.replacement_chain.length === expectedHops) return;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw new Error(`采纳后替换链未达到 ${expectedHops} 跳`);
+  }
+
+  // 第一跳 fruit_growth -> petal_fall
+  await replaceStage(
+    "fruit_growth",
+    "petal_fall",
+    "2026-04-12",
     "核对纸质台账，该观察实为落瓣期，被误选为果实膨大期",
+    1,
   );
-  await page.locator('[data-check="submit-correction"]').click();
-  await page.getByText("勘误已提交，等待受控采纳").waitFor();
-  await page.locator('[data-check="adopt-correction"]').click();
   await page
-    .getByText("勘误已采纳：当前事实更新，原始结论保留为历史")
+    .locator('[data-stage="fruit_growth"][data-lineage-status="replaced_out"]')
+    .waitFor();
+  await page
+    .locator('[data-stage="petal_fall"][data-lineage-status="replaced_in"]')
     .waitFor();
 
-  // 当前轨道只出现正确阶段，谱系成对呈现
-  const movedOut = page
-    .locator('[data-stage="fruit_growth"][data-lineage-status="replaced_out"]');
-  await movedOut.waitFor();
-  const movedIn = page
-    .locator('[data-stage="petal_fall"][data-lineage-status="replaced_in"]');
-  await movedIn.waitFor();
-  const movedInText = await movedIn.innerText();
-  if (!movedInText.includes("2026-04-12")) {
-    throw new Error("替换进入的正确阶段未显示真值日期");
+  // 第二跳 petal_fall -> bud_swell（中间阶段被继续替换）
+  await replaceStage(
+    "petal_fall",
+    "bud_swell",
+    "2026-03-05",
+    "再次核对，同一观察实为更早的芽膨大期",
+    2,
+  );
+
+  // 替换链两跳完整
+  const flowHops = page.locator("[data-check='replacement-flow'] [data-hop-seq]");
+  const hopCount = await flowHops.count();
+  if (hopCount !== 2) {
+    throw new Error("替换链未完整呈现两跳");
   }
+  const transit = page.locator(
+    '[data-stage="petal_fall"][data-lineage-status="replaced_transit"]',
+  );
+  await transit.waitFor();
+  const transitText = await transit.innerText();
+  if (!transitText.includes("果实膨大期") || !transitText.includes("芽膨大期")) {
+    throw new Error("中间阶段未同时标出来源与后续去向");
+  }
+  const finalIn = page.locator(
+    '[data-stage="bud_swell"][data-lineage-status="replaced_in"]',
+  );
+  await finalIn.waitFor();
 
   const afterDetail = await api(`/observations/${left.id}`);
   const currentStages = afterDetail.entries.map((entry) => entry.stage);
-  if (currentStages.includes("fruit_growth")) {
-    throw new Error("当前轨道仍包含误录阶段");
+  if (
+    currentStages.includes("fruit_growth") ||
+    currentStages.includes("petal_fall")
+  ) {
+    throw new Error("当前轨道仍保留起点或中间阶段");
   }
-  if (currentStages.filter((stage) => stage === "petal_fall").length !== 1) {
-    throw new Error("正确阶段在当前轨道未恰好出现一次");
+  if (currentStages.filter((stage) => stage === "bud_swell").length !== 1) {
+    throw new Error("最终阶段在当前轨道未恰好出现一次");
+  }
+  const chainPairs = afterDetail.replacement_chain.map((hop) => [
+    hop.from_stage,
+    hop.to_stage,
+  ]);
+  if (
+    JSON.stringify(chainPairs) !==
+    JSON.stringify([
+      ["fruit_growth", "petal_fall"],
+      ["petal_fall", "bud_swell"],
+    ])
+  ) {
+    throw new Error("替换链两跳顺序不完整");
   }
   const frozenStages = afterDetail.frozen_entries.map((entry) => entry.stage);
-  if (!frozenStages.includes("fruit_growth") || frozenStages.includes("petal_fall")) {
-    throw new Error("原始冻结事实未保留误录阶段");
+  if (!frozenStages.includes("fruit_growth")) {
+    throw new Error("原始冻结事实未保留最初误录阶段");
   }
 
   // 旧图谱冻结，隐式重算被拒绝，再显式接续
@@ -561,11 +632,15 @@ async function checkStageReplacement(page) {
   const newOffsets = Object.fromEntries(
     currentOnes[0].stage_offsets.map((item) => [item.stage, item.offset_days]),
   );
-  if ("fruit_growth" in newOffsets || newOffsets.petal_fall !== 3) {
-    throw new Error("新版图谱未采用替换后的正确阶段");
+  if (
+    "fruit_growth" in newOffsets ||
+    "petal_fall" in newOffsets ||
+    newOffsets.bud_swell !== 3
+  ) {
+    throw new Error("新版图谱未采用最终替换阶段");
   }
 
-  // 简报：旧冻结、新采用
+  // 简报：旧冻结、新采用最终阶段
   const oldBriefs = await api("/briefs");
   const historicalBrief = oldBriefs.items.find(
     (item) => item.basis_status === "superseded",
@@ -587,10 +662,24 @@ async function checkStageReplacement(page) {
     (item) => item.id === left.id,
   );
   if (
-    !("petal_fall" in currentLeft.entry_map) ||
+    !("bud_swell" in currentLeft.entry_map) ||
+    "petal_fall" in currentLeft.entry_map ||
     "fruit_growth" in currentLeft.entry_map
   ) {
-    throw new Error("新版简报未采用替换后的正确阶段");
+    throw new Error("新版简报未采用最终替换阶段");
+  }
+  const briefChain = currentLeft.replacement_chain.map((hop) => [
+    hop.from_stage,
+    hop.to_stage,
+  ]);
+  if (
+    JSON.stringify(briefChain) !==
+    JSON.stringify([
+      ["fruit_growth", "petal_fall"],
+      ["petal_fall", "bud_swell"],
+    ])
+  ) {
+    throw new Error("简报内替换链不完整");
   }
 }
 
