@@ -31,6 +31,13 @@ const statusLabel: Record<TreeRecord["status"], string> = {
     </span>
     <span class="tree-card__main">
       <span class="tree-card__code">{{ tree.code }}</span>
+      <small
+        v-if="tree.code_aliases?.length"
+        class="tree-card__alias"
+        data-check="tree-code-alias"
+      >
+        原编号 {{ tree.code_aliases[0].code }}
+      </small>
       <strong>{{ tree.cultivar }}</strong>
       <small>{{ tree.rootstock || "砧木未记录" }}</small>
     </span>

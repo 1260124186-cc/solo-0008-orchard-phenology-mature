@@ -25,7 +25,7 @@ from .value_checks import (
 )
 
 
-PLOT_CODE_CORRECTION_FIELDS = {"code", "reason", "revision"}
+PLOT_CODE_CORRECTION_FIELDS = {"code", "reason", "revision", "fingerprint"}
 TREE_CODE_CORRECTION_FIELDS = {"code", "reason", "revision"}
 
 _TREE_SUFFIX_PATTERN = "-T"
@@ -124,8 +124,15 @@ def build_plot_code_plan(
 
     # 级联后同园区内编号冲突（包含已退休/已遗失植株，它们仍保留历史）。
     if target_code is not None and not code_errors:
+        # 只有当前前缀与园区一致的植株才参与机械级联；未决植株只列入
+        # pending，必须先经单独的归位修正，不能在变化清单里被默默改名。
+        resolvable = [
+            tree
+            for tree in plot_trees
+            if tree_code_plot_prefix(tree["code"]) == plot["code"]
+        ]
         projected: dict[str, str] = {}
-        for tree in plot_trees:
+        for tree in resolvable:
             suffix = tree_code_suffix(tree["code"])
             if suffix is None:
                 continue
@@ -147,7 +154,7 @@ def build_plot_code_plan(
                 )
             else:
                 projected[next_code] = tree["id"]
-        for tree in plot_trees:
+        for tree in resolvable:
             suffix = tree_code_suffix(tree["code"])
             if suffix is None:
                 continue
@@ -353,8 +360,8 @@ def repair_tree_code(
             raise ConflictError(
                 "tree_code_exists",
                 "该园区内植株编号已存在",
-                tree_id=other["id"],
-                code=next_code,
+                existing_tree_id=other["id"],
+                conflicting_code=next_code,
             )
 
     reason = clean_text(
@@ -455,7 +462,11 @@ def build_identity_report(state: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    unique = not duplicate_plot_codes and not duplicate_tree_codes
+    unique = (
+        not duplicate_plot_codes
+        and not duplicate_tree_codes
+        and not tree_prefix_findings
+    )
     return {
         "unique": unique,
         "duplicate_plot_codes": duplicate_plot_codes,

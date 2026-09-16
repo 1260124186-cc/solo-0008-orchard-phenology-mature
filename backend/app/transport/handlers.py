@@ -94,6 +94,26 @@ class ApiHandlers:
             expected_revision=_optional_revision(body),
         )
 
+    def preview_plot_recode(
+        self,
+        *,
+        params: dict[str, str],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        _reject_unknown(body, {"code", "revision"}, "园区编号修正预览")
+        return self.catalog.preview_plot_code_correction(params["plot_id"], body)
+
+    def recode_plot(
+        self,
+        *,
+        params: dict[str, str],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.catalog.correct_plot_code(params["plot_id"], body)
+
+    def identity_report(self) -> dict[str, Any]:
+        return self.catalog.identity_report()
+
     def list_trees(
         self,
         *,
@@ -117,6 +137,14 @@ class ApiHandlers:
         body: dict[str, Any],
     ) -> dict[str, Any]:
         return self.catalog.retire_tree(params["tree_id"], body)
+
+    def recode_tree(
+        self,
+        *,
+        params: dict[str, str],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.catalog.correct_tree_code(params["tree_id"], body)
 
     def list_observations(
         self,
@@ -384,6 +412,29 @@ def build_router(handlers: ApiHandlers) -> Router:
     )
     router.add(
         "PUT",
+        "/api/plots/{plot_id}/code-correction/preview",
+        handlers.preview_plot_recode,
+        capability="plot:read",
+        resource_kind="plot",
+        resource_id_param="plot_id",
+    )
+    router.add(
+        "PUT",
+        "/api/plots/{plot_id}/code-correction",
+        handlers.recode_plot,
+        capability="plot:write",
+        resource_kind="plot",
+        resource_id_param="plot_id",
+    )
+    router.add(
+        "GET",
+        "/api/identity-report",
+        handlers.identity_report,
+        capability="audit:read",
+        resource_kind="audit",
+    )
+    router.add(
+        "PUT",
         "/api/plots/{plot_id}/briefs",
         handlers.create_brief,
         capability="brief:write",
@@ -417,6 +468,14 @@ def build_router(handlers: ApiHandlers) -> Router:
         "PUT",
         "/api/trees/{tree_id}/close",
         handlers.retire_tree,
+        capability="tree:write",
+        resource_kind="tree",
+        resource_id_param="tree_id",
+    )
+    router.add(
+        "PUT",
+        "/api/trees/{tree_id}/code-correction",
+        handlers.recode_tree,
         capability="tree:write",
         resource_kind="tree",
         resource_id_param="tree_id",

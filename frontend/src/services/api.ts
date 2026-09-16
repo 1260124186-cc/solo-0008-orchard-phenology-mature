@@ -93,6 +93,22 @@ export const api = {
       method: "PUT",
       ...jsonBody({ revision }),
     }),
+  previewPlotCodeCorrection: (id: string, body: unknown) =>
+    request(`/plots/${encodeURIComponent(id)}/code-correction/preview`, {
+      method: "PUT",
+      ...jsonBody(body),
+    }),
+  correctPlotCode: (id: string, body: unknown) =>
+    request(`/plots/${encodeURIComponent(id)}/code-correction`, {
+      method: "PUT",
+      ...jsonBody(body),
+    }),
+  correctTreeCode: (id: string, body: unknown) =>
+    request(`/trees/${encodeURIComponent(id)}/code-correction`, {
+      method: "PUT",
+      ...jsonBody(body),
+    }),
+  identityReport: () => request("/identity-report"),
   listTrees: (query?: Record<string, QueryValue>) =>
     request(`/trees${encodeQuery(query)}`),
   createTree: (body: unknown) =>

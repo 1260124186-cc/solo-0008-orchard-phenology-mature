@@ -239,6 +239,73 @@ class CatalogService:
 
         return copy_tree(self.repository.atomic_update(action))
 
+    def preview_plot_code_correction(
+        self,
+        plot_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = self.repository.read()
+        if plot_id not in state["plots"]:
+            raise NotFoundError("园区", plot_id)
+        plan = build_plot_code_plan(state, plot_id, payload.get("code"))
+        return {
+            "plot_id": plan["plot_id"],
+            "plot_code": plan["plot_code"],
+            "plot_revision": plan["plot_revision"],
+            "new_code": plan["new_code"],
+            "status": plan["status"],
+            "applicable": plan["applicable"],
+            "fingerprint": plan["fingerprint"],
+            "changes": plan["changes"],
+            "pending": plan["pending"],
+            "blockers": plan["blockers"],
+        }
+
+    def correct_plot_code(
+        self,
+        plot_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        actor_id = current_request_context().actor_id or "anonymous"
+
+        def action(state: dict[str, Any]) -> dict[str, Any]:
+            try:
+                _, report = apply_plot_code_correction(
+                    state,
+                    plot_id,
+                    payload,
+                    actor_id=actor_id,
+                )
+            except KeyError:
+                raise NotFoundError("园区", plot_id) from None
+            return report
+
+        return self.repository.atomic_update(action)
+
+    def correct_tree_code(
+        self,
+        tree_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        actor_id = current_request_context().actor_id or "anonymous"
+
+        def action(state: dict[str, Any]) -> dict[str, Any]:
+            try:
+                _, report = repair_tree_code(
+                    state,
+                    tree_id,
+                    payload,
+                    actor_id=actor_id,
+                )
+            except KeyError:
+                raise NotFoundError("植株", tree_id) from None
+            return report
+
+        return self.repository.atomic_update(action)
+
+    def identity_report(self) -> dict[str, Any]:
+        return build_identity_report(self.repository.read())
+
     def _plot_detail(
         self,
         state: dict[str, Any],
@@ -265,6 +332,7 @@ def copy_tree(tree: dict[str, Any]) -> dict[str, Any]:
         "id": tree["id"],
         "plot_id": tree["plot_id"],
         "code": tree["code"],
+        "code_aliases": list(tree.get("code_aliases", [])),
         "cultivar": tree["cultivar"],
         "rootstock": tree["rootstock"],
         "planting_year": tree["planting_year"],

@@ -648,6 +648,8 @@ def _action_name(context: Any) -> str:
         return "complete"
     if template.endswith("/close"):
         return "close"
+    if template.endswith("/code-correction"):
+        return "recode"
     if method == "put":
         return "create"
     if method == "patch":

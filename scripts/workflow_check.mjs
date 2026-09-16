@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const API_ORIGIN = "http://127.0.0.1:8765";
 const UI_ORIGIN = "http://127.0.0.1:4317";
@@ -95,6 +94,9 @@ async function checkCatalog(page) {
   await page.getByText("植株已加入园区").waitFor();
   await page.locator('[data-check="tree-card"]').first().waitFor();
 
+  // 编号修正：验证未决植株阻断、页面内归位、重复编号阻断和整批级联。
+  await checkCodeCorrection(page, runtimeDir);
+
   await page.locator('[data-check="confirm-plot"]').click();
   await page.getByText("园区档案已确认并锁定").waitFor();
   const status = await page.locator('[data-check="plot-status"]').innerText();
@@ -102,14 +104,192 @@ async function checkCatalog(page) {
     throw new Error("页面未显示园区已确认状态");
   }
 
-  const plots = await api("/plots?q=OR-2101");
-  const plot = plots.items.find((item) => item.code === "OR-2101");
-  if (!plot || plot.status !== "confirmed" || plot.tree_count !== 1) {
+  const plots = await api("/plots?q=OR-2401");
+  const plot = plots.items.find((item) => item.code === "OR-2401");
+  if (!plot || plot.status !== "confirmed" || plot.tree_count !== 2) {
     throw new Error("服务端园区确认结果不符合预期");
   }
+  if (!plot.code_aliases?.some((alias) => alias.code === "OR-2101")) {
+    throw new Error("园区详情缺少旧编号别名轨迹");
+  }
   const trees = await api(`/trees?plot_id=${encodeURIComponent(plot.id)}`);
-  if (trees.items.length !== 1 || trees.items[0].code !== "OR-2101-T01") {
-    throw new Error("服务端植株目录与页面操作不一致");
+  const codes = trees.items.map((item) => item.code).sort();
+  if (JSON.stringify(codes) !== JSON.stringify(["OR-2401-T01", "OR-2401-T02"])) {
+    throw new Error(`级联后植株编号不符合预期：${codes.join(", ")}`);
+  }
+  for (const tree of trees.items) {
+    if (!tree.code_aliases?.some((alias) => alias.code.startsWith("OR-2101-"))) {
+      throw new Error(`植株 ${tree.code} 缺少旧编号轨迹`);
+    }
+  }
+
+  // 身份核对：园区、植株编号唯一，全部历史对象都能用别名解释。
+  const identity = await api("/identity-report");
+  if (!identity.unique || identity.unresolved_trees.length !== 0) {
+    throw new Error("修正后身份核对未通过");
+  }
+  if (identity.historical_objects.some((item) => !item.explainable)) {
+    throw new Error("存在无法解释新旧编号归属的历史对象");
+  }
+}
+
+async function checkCodeCorrection(page, runtimeDir) {
+  const plot = (await api("/plots?q=OR-2101")).items[0];
+
+  // 1) 未决植株：先创建合规 T02，再通过临时数据库把它改成历史遗留的
+  //    跨前缀编号 XX-9001-T02，模拟旧档案导入后的脏数据。
+  const stray = await api("/trees", "PUT", {
+    plot_id: plot.id,
+    code: "OR-2101-T02",
+    cultivar: "黄皮秋梨",
+    rootstock: "杜梨",
+    planting_year: 2009,
+    status: "active",
+    note: "历史遗留的未决编号",
+  });
+  rewriteTreeCode(runtimeDir, stray.id, "XX-9001-T02");
+
+  await page.locator('[data-check="recode-code"]').fill("OR-2401");
+  await page.locator('[data-check="recode-reason"]').fill("园区编号换段修正");
+  await page.locator('[data-check="recode-preview"]').click();
+  await page.locator('[data-check="recode-plan"]').waitFor();
+  await page
+    .locator('[data-check="recode-plan"] .recode-plan__banner--blocked')
+    .waitFor();
+  await page.locator('[data-check="recode-pending"]').waitFor();
+  await page
+    .locator('[data-check="recode-pending"]')
+    .getByText("XX-9001-T02")
+    .first()
+    .waitFor();
+  const blockedApply = page.locator('[data-check="recode-apply"]');
+  if (await blockedApply.isEnabled()) {
+    throw new Error("存在未决植株时修正按钮不应可执行");
+  }
+
+  // 阻断期间所有对象保持旧编号。
+  const blockedPlot = (await api(`/plots/${encodeURIComponent(plot.id)}`));
+  if (blockedPlot.code !== "OR-2101") {
+    throw new Error("未决植株阻断时园区编号被部分改写");
+  }
+  const blockedTrees = await api(
+    `/trees?plot_id=${encodeURIComponent(plot.id)}`,
+  );
+  const blockedCodes = blockedTrees.items.map((item) => item.code).sort();
+  if (JSON.stringify(blockedCodes) !== JSON.stringify(["OR-2101-T01", "XX-9001-T02"])) {
+    throw new Error(`阻断时植株编号不符合预期：${blockedCodes.join(", ")}`);
+  }
+
+  // 2) 在页面内把未决植株归位。
+  await page.locator('[data-check="recode-repair-start"]').click();
+  await page.locator('[data-check="recode-repair-code"]').fill("OR-2101-T02");
+  await page
+    .locator('[data-check="recode-repair-form"] button[type="submit"]')
+    .click();
+  await page
+    .locator('[data-check="toast-stack"]')
+    .getByText("未决植株编号已归位")
+    .waitFor();
+  // 归位后自动重新预览，此时目标编号仍空闲，计划转为可执行。
+  await page
+    .locator('[data-check="recode-plan"] .recode-plan__banner--ok')
+    .waitFor();
+
+  // 3) 并发占用：其他请求先占用 OR-2401，执行必须被拒绝且不落库。
+  await api("/plots", "PUT", {
+    code: "OR-2401",
+    name: "临时占位园区",
+    locality: "临时地点",
+    cultivar_focus: "占位品种",
+    steward: "检查组",
+    planting_year: 2009,
+    note: "",
+  });
+  await page.locator('[data-check="recode-apply"]').click();
+  await page
+    .locator('[data-check="toast-stack"]')
+    .getByText("园区编号已被其他园区使用")
+    .waitFor();
+  const stillOld = await api(`/plots/${encodeURIComponent(plot.id)}`);
+  if (stillOld.code !== "OR-2101") {
+    throw new Error("重复编号阻断时园区编号被改写");
+  }
+
+  // 4) 占位园区把编号让给 OR-2509，再整批级联到 OR-2401。
+  const placeholder = (await api("/plots?q=OR-2401")).items[0];
+  await api(`/plots/${placeholder.id}/code-correction`, "PUT", {
+    code: "OR-2509",
+    reason: "让出编号",
+    revision: placeholder.revision,
+  });
+  await page.locator('[data-check="recode-preview"]').click();
+  await page
+    .locator('[data-check="recode-plan"] .recode-plan__banner--ok')
+    .waitFor();
+  const plannedChanges = await page.locator(".recode-changes li").count();
+  if (plannedChanges !== 2) {
+    throw new Error(`级联计划应覆盖两株植株，实际为 ${plannedChanges}`);
+  }
+  await page.locator('[data-check="recode-apply"]').click();
+  await page
+    .locator('[data-check="toast-stack"]')
+    .getByText("编号已整体修正为 OR-2401")
+    .waitFor();
+
+  await page.locator('[data-check="plot-code-history"]').first().waitFor();
+  const trees = await api(`/trees?plot_id=${encodeURIComponent(plot.id)}`);
+  const finalCodes = trees.items.map((item) => item.code).sort();
+  if (JSON.stringify(finalCodes) !== JSON.stringify(["OR-2401-T01", "OR-2401-T02"])) {
+    throw new Error(`级联后植株编号不符合预期：${finalCodes.join(", ")}`);
+  }
+  const repaired = trees.items.find((item) => item.id === stray.id);
+  if (
+    !repaired.code_aliases?.some((alias) => alias.code === "XX-9001-T02") ||
+    !repaired.code_aliases?.some((alias) => alias.code === "OR-2101-T02")
+  ) {
+    throw new Error("归位并级联的植株缺少完整的旧编号轨迹");
+  }
+
+  // 5) 页面身份核对面板显示通过。
+  await page.locator('[data-check="identity-report-load"]').click();
+  await page.locator('[data-check="identity-report"]').waitFor();
+  await page
+    .locator('[data-check="identity-report"]')
+    .getByText("身份核对通过")
+    .waitFor();
+}
+
+function rewriteTreeCode(runtimeDir, treeId, nextCode) {
+  // 浏览器链路无法产生跨前缀编号，用临时库直接改写实体 JSON，
+  // 模拟旧版档案导入后遗留的未决植株。
+  const databasePath = join(runtimeDir, "atlas.sqlite3");
+  const script = `
+import json, sqlite3, sys
+connection = sqlite3.connect(sys.argv[1])
+row = connection.execute(
+    "SELECT payload FROM entities WHERE kind = 'tree' AND id = ?",
+    (sys.argv[2],),
+).fetchone()
+if row is None:
+    raise SystemExit("missing tree")
+payload = json.loads(row[0])
+payload["code"] = sys.argv[3]
+connection.execute(
+    "UPDATE entities SET payload = ? WHERE kind = 'tree' AND id = ?",
+    (json.dumps(payload, ensure_ascii=False, separators=(",", ":")), sys.argv[2]),
+)
+connection.commit()
+connection.close()
+`;
+  const result = spawnSync(
+    "python3",
+    ["-c", script, databasePath, treeId, nextCode],
+    { encoding: "utf-8" },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `写入未决植株失败：${result.stderr || result.stdout}`,
+    );
   }
 }
 

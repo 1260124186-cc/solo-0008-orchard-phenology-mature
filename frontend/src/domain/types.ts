@@ -11,6 +11,15 @@ export interface StageDefinition {
   required_for_completion: boolean;
 }
 
+export interface CodeAlias {
+  code: string;
+  changed_to: string;
+  reason: string;
+  actor_id: string;
+  changed_at: string;
+  cause: string;
+}
+
 export interface PlotSummary {
   id: string;
   code: string;
@@ -22,6 +31,7 @@ export interface PlotSummary {
   note: string;
   status: PlotStatus;
   revision: number;
+  code_aliases?: readonly CodeAlias[];
   created_at: string;
   updated_at: string;
   confirmed_at: string | null;
@@ -36,6 +46,7 @@ export interface TreeRecord {
   id: string;
   plot_id: string;
   code: string;
+  code_aliases?: readonly CodeAlias[];
   cultivar: string;
   rootstock: string;
   planting_year: number;
@@ -44,6 +55,104 @@ export interface TreeRecord {
   revision: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface CodeCorrectionChange {
+  tree_id: string;
+  tree_code: string;
+  next_code: string;
+  tree_revision: number;
+  status: TreeStatus;
+}
+
+export interface CodeCorrectionBlocker {
+  kind: string;
+  message: string;
+  tree_id?: string;
+  tree_code?: string;
+  plot_id?: string;
+  code?: string;
+  expected_prefix?: string;
+  tree_revision?: number;
+  conflicting_code?: string;
+  conflicting_tree_id?: string;
+}
+
+export interface PlotCodeCorrectionPlan {
+  plot_id: string;
+  plot_code: string;
+  plot_revision: number;
+  new_code: string | null;
+  status: PlotStatus;
+  applicable: boolean;
+  fingerprint: string;
+  changes: readonly CodeCorrectionChange[];
+  pending: readonly CodeCorrectionBlocker[];
+  blockers: readonly CodeCorrectionBlocker[];
+}
+
+export interface PlotCodeCorrectionReport {
+  plot_id: string;
+  old_code: string;
+  new_code: string;
+  reason: string;
+  revision: number;
+  trees: readonly {
+    tree_id: string;
+    old_code: string;
+    new_code: string;
+    revision: number;
+    status: TreeStatus;
+  }[];
+  unchanged_objects: readonly unknown[];
+  historical_objects: readonly { kind: string; frozen_fields: readonly string[] }[];
+  applied_at: string;
+}
+
+export interface TreeCodeRepairReport {
+  tree_id: string;
+  old_code: string;
+  new_code: string;
+  reason: string;
+  revision: number;
+  applied_at: string;
+}
+
+export interface IdentityReport {
+  unique: boolean;
+  duplicate_plot_codes: readonly {
+    code: string;
+    plot_ids: readonly string[];
+  }[];
+  duplicate_tree_codes: readonly {
+    plot_id: string;
+    code: string;
+    tree_ids: readonly string[];
+  }[];
+  unresolved_trees: readonly {
+    tree_id: string;
+    tree_code: string;
+    plot_id: string;
+    plot_code: string | null;
+    status: string;
+  }[];
+  historical_objects: readonly {
+    kind: string;
+    id: string;
+    left_tree_id?: string;
+    right_tree_id?: string;
+    left_label?: string;
+    right_label?: string;
+    plot_id?: string;
+    plot_code?: string;
+    frozen_at: string;
+    state_revision?: number;
+    explainable: boolean;
+  }[];
+  plot_count: number;
+  tree_count: number;
+  comparison_count: number;
+  brief_count: number;
 }
 
 export interface StageEntry {

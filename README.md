@@ -165,8 +165,12 @@ node scripts/workflow_check.mjs --workflow compare
 - `GET|PUT /api/plots`：查询或建立园区。
 - `GET|PATCH /api/plots/{plot_id}`：读取或修订草稿园区。
 - `PUT /api/plots/{plot_id}/confirm`：确认并冻结园区基础信息。
+- `PUT /api/plots/{plot_id}/code-correction/preview`：预览园区编号修正的级联计划与待处理对象。
+- `PUT /api/plots/{plot_id}/code-correction`：在单事务内整批修正园区与全部关联植株编号。
+- `GET /api/identity-report`：核对园区、植株编号唯一性以及历史比较/简报编号的可解释性。
 - `GET|PUT /api/trees`：查询或加入植株。
 - `PUT /api/trees/{tree_id}/close`：标记植株退休或遗失。
+- `PUT /api/trees/{tree_id}/code-correction`：把前缀不一致的未决植株编号归位到所属园区。
 - `GET|PUT /api/observations`：查询或建立季节志。
 - `PATCH /api/observations/{id}`：修订草稿季节志说明。
 - `PUT /api/observations/{id}/stages`：补录物候阶段。
@@ -179,6 +183,8 @@ node scripts/workflow_check.mjs --workflow compare
 ## 数据与一致性
 
 - 园区确认后不能直接修改基础信息；本基线不提供重新打开动作。
+- 园区编号修正（`PUT /api/plots/{id}/code-correction`）在单个事务内同时更新园区与全部关联植株编号；存在重复编号、过期计划（并发修订）或前缀不一致的未决植株时整批拒绝，错误详情列出全部待处理对象，不会留下部分新编号。未决植株可通过 `PUT /api/trees/{id}/code-correction` 就地归位后重试。
+- 编号修正不写历史：对比图谱的左右标签、简报中冻结的园区/植株编号保持生成时内容；园区与植株上的 `code_aliases` 轨迹记录新旧编号、原因、操作者与时间，`GET /api/identity-report` 据此核对身份唯一并标记每条历史结果是否仍可解释。
 - 同一园区内植株编号唯一；定植年份不能早于园区起始种植年份。
 - 同一植株、同一年份只能建立一份季节志。
 - 完成后季节志不可增删阶段；完成前必须包含萌芽期、盛花期、坐果期和采收期。

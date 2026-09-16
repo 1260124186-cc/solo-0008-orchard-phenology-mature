@@ -23,7 +23,7 @@ function iconFor(tone: Notice["tone"]) {
 </script>
 
 <template>
-  <div class="toast-stack" aria-live="polite">
+  <div class="toast-stack" aria-live="polite" data-check="toast-stack">
     <div
       v-for="notice in notices"
       :key="notice.id"

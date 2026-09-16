@@ -14,6 +14,7 @@ import EmptyState from "../components/EmptyState.vue";
 import PlotForm from "../components/PlotForm.vue";
 import TreeCard from "../components/TreeCard.vue";
 import TreeForm from "../components/TreeForm.vue";
+import CodeCorrectionPanel from "../components/CodeCorrectionPanel.vue";
 import { formatTimestamp } from "../domain/rules";
 import { useWorkspace } from "../app/workspace";
 
@@ -147,6 +148,20 @@ function selectTree(tree: { id: string }) {
           <p class="folio-note">
             {{ selectedPlot.note || "尚未补充档案说明。" }}
           </p>
+
+          <div
+            v-if="selectedPlot.code_aliases?.length"
+            class="folio-code-history"
+            data-check="plot-code-history"
+          >
+            <span class="eyebrow">编号轨迹</span>
+            <p v-for="alias in selectedPlot.code_aliases" :key="`${alias.code}-${alias.changed_at}`">
+              <code>{{ alias.code }}</code>
+              改为
+              <code>{{ alias.changed_to }}</code>
+              <small>（{{ alias.reason }}）</small>
+            </p>
+          </div>
         </div>
 
         <div class="tree-section">
@@ -186,6 +201,12 @@ function selectTree(tree: { id: string }) {
           v-if="selectedPlot.status === 'draft'"
           :plot="selectedPlot"
           @create="createTree"
+        />
+
+        <CodeCorrectionPanel
+          v-if="selectedPlot.status === 'draft'"
+          :key="`recode-${selectedPlot.id}`"
+          :plot="selectedPlot"
         />
 
         <div class="confirmation-band">

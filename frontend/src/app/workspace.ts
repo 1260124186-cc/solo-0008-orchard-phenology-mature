@@ -2,9 +2,13 @@ import { computed, reactive, readonly } from "vue";
 import { STAGES } from "../domain/stages";
 import type {
   ComparisonSummary,
+  IdentityReport,
   ObservationSummary,
+  PlotCodeCorrectionPlan,
+  PlotCodeCorrectionReport,
   PlotDetail,
   PlotSummary,
+  TreeCodeRepairReport,
   WorkspaceKey,
 } from "../domain/types";
 import { api, errorMessage } from "../services/api";
@@ -206,6 +210,55 @@ export function useWorkspace() {
     return api.createBrief(plotId, title);
   }
 
+  async function previewPlotCodeCorrection(
+    plotId: string,
+    code: string,
+  ): Promise<PlotCodeCorrectionPlan> {
+    return (await api.previewPlotCodeCorrection(plotId, {
+      code,
+    })) as PlotCodeCorrectionPlan;
+  }
+
+  async function correctPlotCode(
+    plotId: string,
+    payload: {
+      code: string;
+      reason: string;
+      revision: number;
+      fingerprint: string;
+    },
+  ): Promise<PlotCodeCorrectionReport> {
+    const report = (await api.correctPlotCode(
+      plotId,
+      payload,
+    )) as PlotCodeCorrectionReport;
+    await Promise.all([
+      loadPlot(plotId),
+      refreshPlots(),
+      refreshObservations(),
+    ]);
+    return report;
+  }
+
+  async function repairTreeCode(
+    treeId: string,
+    payload: { code: string; reason: string; revision: number },
+  ): Promise<TreeCodeRepairReport> {
+    const report = (await api.correctTreeCode(
+      treeId,
+      payload,
+    )) as TreeCodeRepairReport;
+    if (state.selectedPlotId) {
+      await loadPlot(state.selectedPlotId);
+    }
+    await refreshObservations();
+    return report;
+  }
+
+  async function loadIdentityReport(): Promise<IdentityReport> {
+    return (await api.identityReport()) as IdentityReport;
+  }
+
   function replaceObservation(updated: ObservationSummary): void {
     const index = state.observations.findIndex((item) => item.id === updated.id);
     if (index >= 0) {
@@ -289,6 +342,10 @@ export function useWorkspace() {
     completeObservation,
     createComparison,
     createBrief,
+    previewPlotCodeCorrection,
+    correctPlotCode,
+    repairTreeCode,
+    loadIdentityReport,
     setActiveWorkspace,
     selectPlot,
     selectObservation,

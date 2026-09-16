@@ -728,6 +728,259 @@ button:disabled {
   font-size: 9px;
 }
 
+.tree-card__alias {
+  color: var(--ochre) !important;
+}
+
+.folio-code-history {
+  margin: 4px 0 12px;
+  padding: 10px 13px;
+  background: var(--ochre-soft);
+  border-left: 3px solid var(--ochre);
+  border-radius: 4px;
+}
+
+.folio-code-history p {
+  margin: 5px 0 0;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.folio-code-history code {
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.65);
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.recode-panel {
+  margin: 16px 0;
+  padding: 17px 18px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(39, 56, 44, 0.05);
+}
+
+.recode-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recode-panel__header h3 {
+  margin: 3px 0 0;
+  font-size: 15px;
+}
+
+.recode-panel__header > svg {
+  color: var(--moss);
+}
+
+.recode-panel__lead {
+  margin: 8px 0 14px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.recode-plan {
+  margin-top: 14px;
+  padding: 13px 14px;
+  background: var(--paper-deep);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.recode-plan__banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.recode-plan__banner--ok {
+  color: var(--moss-dark);
+  background: var(--moss-soft);
+}
+
+.recode-plan__banner--blocked {
+  color: var(--vermilion);
+  background: var(--vermilion-soft);
+}
+
+.recode-pending {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.recode-pending__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--vermilion);
+  border-radius: 6px;
+}
+
+.recode-pending__item strong {
+  display: block;
+  color: var(--vermilion);
+  font-size: 12px;
+}
+
+.recode-pending__item span {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.recode-repair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.recode-repair input {
+  width: 132px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.recode-repair input:nth-child(2) {
+  width: 170px;
+}
+
+.recode-repair__error {
+  margin: 8px 0 0;
+  color: var(--vermilion);
+  font-size: 11px;
+}
+
+.recode-blockers {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recode-blockers li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--vermilion);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.recode-changes {
+  margin-top: 11px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.recode-changes ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 14px;
+}
+
+.recode-changes li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.recode-changes code {
+  padding: 1px 5px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.recode-plan .button--primary {
+  margin-top: 13px;
+}
+
+.recode-history {
+  margin-top: 13px;
+  padding: 10px 12px;
+  background: var(--paper-deep);
+  border-radius: 6px;
+}
+
+.recode-history header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--moss-dark);
+}
+
+.recode-history ol {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.recode-history code {
+  font-size: 10px;
+}
+
+.recode-identity {
+  margin-top: 13px;
+}
+
+.recode-identity__report {
+  margin-top: 10px;
+  padding: 11px 13px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.recode-identity__report p,
+.recode-identity__report li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  color: var(--ink-soft);
+}
+
+.recode-identity__report .is-ok {
+  color: var(--moss-dark);
+}
+
+.recode-identity__report .is-bad {
+  color: var(--vermilion);
+}
+
+.button--small {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
 .tree-card__side {
   text-align: right;
 }

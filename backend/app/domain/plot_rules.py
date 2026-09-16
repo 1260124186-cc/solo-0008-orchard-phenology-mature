@@ -76,6 +76,7 @@ def create_plot_record(payload: dict[str, Any], timestamp: str) -> dict[str, Any
         **normalized,
         "status": "draft",
         "revision": 1,
+        "code_aliases": [],
         "created_at": timestamp,
         "updated_at": timestamp,
         "confirmed_at": None,
@@ -226,6 +227,7 @@ def create_tree_record(
         "schema_version": 1,
         **normalized,
         "revision": 1,
+        "code_aliases": [],
         "created_at": timestamp,
         "updated_at": timestamp,
     }
@@ -322,6 +324,7 @@ def plot_summary(plot: dict[str, Any], tree_count: int) -> dict[str, Any]:
         "note": plot["note"],
         "status": plot["status"],
         "revision": plot["revision"],
+        "code_aliases": list(plot.get("code_aliases", [])),
         "created_at": plot["created_at"],
         "updated_at": plot["updated_at"],
         "confirmed_at": plot["confirmed_at"],
