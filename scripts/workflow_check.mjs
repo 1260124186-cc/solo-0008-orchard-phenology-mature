@@ -285,22 +285,39 @@ async function checkTreeStatus(page) {
   const transitionTexts = await page
     .locator('[data-check="tree-status-timeline"] .status-timeline__transition')
     .allInnerTexts();
-  const expectedTransitions = [
+  // 时间线按序号倒序：最新变化在最上，序号 1 的建株记录在最下
+  const expectedOrderedTransitions = [
     "已退休 → 在册",
     "在册 → 已退休",
     "已遗失 → 在册",
     "在册 → 已遗失",
+    "建档入册",
   ];
-  for (const expected of expectedTransitions) {
-    if (!transitionTexts.some((text) => text.replace(/\s/g, "").includes(expected.replace(/\s/g, "")))) {
+  const normalizeText = (value) => value.replace(/\s/g, "");
+  if (transitionTexts.length !== expectedOrderedTransitions.length) {
+    throw new Error(
+      `重新打开页面后沿革条数应为 ${expectedOrderedTransitions.length}，实际：${JSON.stringify(transitionTexts)}`,
+    );
+  }
+  expectedOrderedTransitions.forEach((expected, index) => {
+    if (normalizeText(transitionTexts[index]) !== normalizeText(expected)) {
       throw new Error(
-        `重新打开页面后沿革缺少“${expected}”，实际：${JSON.stringify(transitionTexts)}`,
+        `重新打开页面后第 ${index + 1} 条沿革应为“${expected}”，实际：${JSON.stringify(transitionTexts)}`,
       );
     }
-  }
-  if (transitionTexts.some((text) => text.includes("建档入册"))) {
+  });
+  // 仅末条（首条建株记录）允许是“建档入册”；第二至最后一轮真实变化不得退化
+  const changedTransitions = transitionTexts.slice(0, -1);
+  if (
+    changedTransitions.some((text) => normalizeText(text).includes("建档入册"))
+  ) {
     throw new Error(
       `重新打开页面后真实状态变化退化成了建档入册：${JSON.stringify(transitionTexts)}`,
+    );
+  }
+  if (!normalizeText(transitionTexts.at(-1)).includes("建档入册")) {
+    throw new Error(
+      `首条建株记录应明确显示为建档入册：${JSON.stringify(transitionTexts)}`,
     );
   }
   const panelNote = await page.locator(".tree-status-panel__note").innerText();
@@ -600,6 +617,8 @@ function startProcess(command, args) {
     cwd: ROOT,
     env: { ...process.env, CI: "1" },
     stdio: ["ignore", "pipe", "pipe"],
+    // 独立进程组，停止时可整组回收（npm 壳进程不会把信号转给 vite/esbuild 孙进程）
+    detached: true,
   });
   child.output = "";
   child.stdout.on("data", (chunk) => {
@@ -615,15 +634,43 @@ function startProcess(command, args) {
 }
 
 async function stopProcess(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  const exited = await Promise.race([
-    new Promise((resolveExit) => child.once("exit", () => resolveExit(true))),
+  if (!child || child.exitCode !== null) {
+    endProcessPipes(child);
+    return;
+  }
+  const exited = new Promise((resolve) => child.once("exit", () => resolve(true)));
+  try {
+    // 负号 pid 表示向整个进程组发信号，连带 vite、esbuild 等孙进程一起停止
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    try {
+      child.kill("SIGTERM");
+    } catch {}
+  }
+  const didExit = await Promise.race([
+    exited,
     new Promise((resolveTimeout) => setTimeout(() => resolveTimeout(false), 2500)),
   ]);
-  if (!exited) {
-    child.kill("SIGKILL");
+  if (!didExit) {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+    }
     console.error("检查进程未能及时退出，已强制结束。");
+  }
+  // 释放本进程持有的子进程 stdio 管道，避免残留 Socket 让事件循环无法退出
+  endProcessPipes(child);
+}
+
+function endProcessPipes(child) {
+  if (!child) return;
+  for (const stream of [child.stdout, child.stderr]) {
+    if (stream && !stream.destroyed) {
+      stream.destroy();
+    }
   }
 }
 
