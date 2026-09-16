@@ -168,6 +168,30 @@ export function useWorkspace() {
     replaceObservation(updated);
   }
 
+  async function putAbsence(
+    observation: ObservationSummary,
+    payload: { stage: string; reason: string; basis: string },
+  ): Promise<ObservationSummary> {
+    const updated = (await api.putAbsence(observation.id, {
+      ...payload,
+      revision: observation.revision,
+    })) as ObservationSummary;
+    replaceObservation(updated);
+    return updated;
+  }
+
+  async function removeAbsence(
+    observation: ObservationSummary,
+    stage: string,
+  ): Promise<void> {
+    const updated = (await api.removeAbsence(
+      observation.id,
+      stage,
+      observation.revision,
+    )) as ObservationSummary;
+    replaceObservation(updated);
+  }
+
   async function completeObservation(
     observation: ObservationSummary,
   ): Promise<void> {
@@ -286,6 +310,8 @@ export function useWorkspace() {
     startObservation,
     addStage,
     removeStage,
+    putAbsence,
+    removeAbsence,
     completeObservation,
     createComparison,
     createBrief,

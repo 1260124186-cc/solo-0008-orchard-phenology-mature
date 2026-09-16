@@ -10,6 +10,8 @@ from ..domain.observation_rules import (
     create_observation_record,
     ensure_unique_open_observation,
     observation_summary,
+    put_absence_marker,
+    remove_absence_marker,
     remove_stage_entry,
     update_observation_note,
 )
@@ -158,6 +160,69 @@ class ObservationService:
             if observation is None:
                 raise NotFoundError("季节志", observation_id)
             updated = remove_stage_entry(
+                observation,
+                stage,
+                expected_revision=revision,
+            )
+            state["observations"][observation_id] = updated
+            return updated
+
+        updated = self.repository.atomic_update(action)
+        return observation_summary(
+            updated,
+            self._tree_snapshot(updated["tree_id"]),
+        )
+
+    def put_absence(
+        self,
+        observation_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if "revision" not in payload:
+            raise ValidationError("登记缺失说明需要 revision", field_name="revision")
+        revision = payload["revision"]
+        marker_payload = {key: value for key, value in payload.items() if key != "revision"}
+
+        def action(state: dict[str, Any]) -> dict[str, Any]:
+            observation = state["observations"].get(observation_id)
+            if observation is None:
+                raise NotFoundError("季节志", observation_id)
+            updated = put_absence_marker(
+                observation,
+                marker_payload,
+                expected_revision=revision,
+            )
+            state["observations"][observation_id] = updated
+            return updated
+
+        updated = self.repository.atomic_update(action)
+        return observation_summary(
+            updated,
+            self._tree_snapshot(updated["tree_id"]),
+        )
+
+    def remove_absence(
+        self,
+        observation_id: str,
+        stage: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        allowed = {"revision"}
+        unknown = sorted(set(payload) - allowed)
+        if unknown:
+            raise ValidationError(
+                "移除缺失说明包含不支持的字段",
+                details={"unknown_fields": unknown},
+            )
+        if "revision" not in payload:
+            raise ValidationError("移除缺失说明需要 revision", field_name="revision")
+        revision = payload["revision"]
+
+        def action(state: dict[str, Any]) -> dict[str, Any]:
+            observation = state["observations"].get(observation_id)
+            if observation is None:
+                raise NotFoundError("季节志", observation_id)
+            updated = remove_absence_marker(
                 observation,
                 stage,
                 expected_revision=revision,

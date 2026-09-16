@@ -123,6 +123,24 @@ export const api = {
       `/observations/${encodeURIComponent(id)}/stages/${encodeURIComponent(stage)}`,
       { method: "DELETE", ...jsonBody({ revision }) },
     ),
+  putAbsence: (
+    id: string,
+    body: {
+      stage: string;
+      reason: string;
+      basis: string;
+      revision: number;
+    },
+  ) =>
+    request(`/observations/${encodeURIComponent(id)}/absences`, {
+      method: "PUT",
+      ...jsonBody(body),
+    }),
+  removeAbsence: (id: string, stage: string, revision: number) =>
+    request(
+      `/observations/${encodeURIComponent(id)}/absences/${encodeURIComponent(stage)}`,
+      { method: "DELETE", ...jsonBody({ revision }) },
+    ),
   completeObservation: (id: string, revision: number) =>
     request(`/observations/${encodeURIComponent(id)}/complete`, {
       method: "PUT",

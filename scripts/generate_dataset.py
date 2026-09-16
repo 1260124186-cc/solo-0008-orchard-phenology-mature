@@ -14,6 +14,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
+from app.domain.observation_rules import (  # noqa: E402
+    build_completion_basis,
+    completion_readiness,
+)
 from app.persistence import Database  # noqa: E402
 
 
@@ -97,25 +101,33 @@ def main() -> int:
                     )
                     observation_ids.append(observation_id)
                     entries = _season_entries(season)
+                    record = {
+                        "id": observation_id,
+                        "schema_version": 1,
+                        "tree_id": tree_id,
+                        "plot_id": plot_id,
+                        "season": season,
+                        "observer": f"观察员 {plot_index % 41}",
+                        "note": "规模数据",
+                        "status": "completed",
+                        "entries": entries,
+                        "absence_markers": [],
+                        "completion_basis": None,
+                        "revision": 1,
+                        "created_at": timestamp,
+                        "updated_at": timestamp,
+                        "completed_at": timestamp,
+                    }
+                    record["completion_basis"] = build_completion_basis(
+                        record,
+                        completion_readiness(record),
+                        timestamp,
+                    )
                     _upsert(
                         connection,
                         "observation",
                         observation_id,
-                        {
-                            "id": observation_id,
-                            "schema_version": 1,
-                            "tree_id": tree_id,
-                            "plot_id": plot_id,
-                            "season": season,
-                            "observer": f"观察员 {plot_index % 41}",
-                            "note": "规模数据",
-                            "status": "completed",
-                            "entries": entries,
-                            "revision": 1,
-                            "created_at": timestamp,
-                            "updated_at": timestamp,
-                            "completed_at": timestamp,
-                        },
+                        record,
                         timestamp,
                     )
 

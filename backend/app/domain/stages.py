@@ -16,6 +16,16 @@ class StageDefinition:
     required_for_completion: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AbsenceReason:
+    key: str
+    label: str
+    description: str
+    # 只有“当年不适用”且附带依据时，才能作为必需阶段的完成依据；
+    # “未观察到”和“仍在核实”始终表示工作尚未结束，不能绕过必需阶段。
+    resolves_completion: bool
+
+
 STAGES: tuple[StageDefinition, ...] = (
     StageDefinition("bud_swell", "芽膨大期", 10, False),
     StageDefinition("bud_burst", "萌芽期", 20, True),
@@ -27,6 +37,34 @@ STAGES: tuple[StageDefinition, ...] = (
     StageDefinition("harvest", "采收期", 80, True),
     StageDefinition("leaf_fall", "落叶期", 90, False),
 )
+
+ABSENCE_REASONS: tuple[AbsenceReason, ...] = (
+    AbsenceReason(
+        "unobserved",
+        "未观察到",
+        "本季没有观察到该阶段，不代表阶段未发生",
+        False,
+    ),
+    AbsenceReason(
+        "not_applicable",
+        "当年不适用",
+        "有依据表明该阶段本季确实不发生，可作为完成依据",
+        True,
+    ),
+    AbsenceReason(
+        "pending_verification",
+        "仍在核实",
+        "观察结果尚待核实，完成前必须转为记录或给出结论",
+        False,
+    ),
+)
+
+ABSENCE_REASON_BY_KEY = {reason.key: reason for reason in ABSENCE_REASONS}
+
+# “不适用”要替代一条真实观察成为完成依据，依据文字必须达到最低长度，
+# 避免把标记当作绕过必需阶段的开关。
+ABSENCE_BASIS_MINIMUM = 10
+ABSENCE_BASIS_MAXIMUM = 300
 
 STAGE_BY_KEY = {stage.key: stage for stage in STAGES}
 
@@ -59,3 +97,37 @@ def required_stage_keys() -> set[str]:
 
 def stage_labels() -> dict[str, str]:
     return {stage.key: stage.label for stage in STAGES}
+
+
+def absence_reason_definition(key: str) -> AbsenceReason:
+    normalized = str(key or "").strip().lower()
+    try:
+        return ABSENCE_REASON_BY_KEY[normalized]
+    except KeyError as exc:
+        raise ValidationError(
+            "未知的缺失原因",
+            field_name="reason",
+            details={"reason": key, "allowed": list(ABSENCE_REASON_BY_KEY)},
+        ) from exc
+
+
+def absence_reason_catalog() -> list[dict[str, object]]:
+    return [
+        {
+            "key": reason.key,
+            "label": reason.label,
+            "description": reason.description,
+            "resolves_completion": reason.resolves_completion,
+        }
+        for reason in ABSENCE_REASONS
+    ]
+
+
+def sort_absence_markers(markers: Iterable[dict[str, object]]) -> list[dict[str, object]]:
+    return sorted(
+        markers,
+        key=lambda item: (
+            STAGE_BY_KEY.get(str(item.get("stage")), STAGES[-1]).rank,
+            str(item.get("created_at", "")),
+        ),
+    )

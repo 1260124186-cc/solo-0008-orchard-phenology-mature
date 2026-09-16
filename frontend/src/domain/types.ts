@@ -4,11 +4,79 @@ export type PlotStatus = "draft" | "confirmed";
 export type TreeStatus = "active" | "retired" | "lost";
 export type ObservationStatus = "open" | "completed";
 
+export type AbsenceReasonKey = "unobserved" | "not_applicable" | "pending_verification";
+
+export type StageResolutionState =
+  | "observed"
+  | "not_applicable"
+  | "unobserved"
+  | "pending_verification"
+  | "basis_incomplete"
+  | "unrecorded";
+
 export interface StageDefinition {
   key: string;
   label: string;
   rank: number;
   required_for_completion: boolean;
+}
+
+export interface AbsenceReasonDefinition {
+  key: AbsenceReasonKey;
+  label: string;
+  description: string;
+  resolves_completion: boolean;
+}
+
+export interface AbsenceMarker {
+  id: string;
+  stage: string;
+  reason: AbsenceReasonKey;
+  basis: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompletionReadiness {
+  stages: readonly {
+    stage: string;
+    label: string;
+    required: boolean;
+    state: StageResolutionState;
+  }[];
+  unresolved: readonly {
+    stage: string;
+    label: string;
+    state: Exclude<
+      StageResolutionState,
+      "observed" | "not_applicable"
+    >;
+  }[];
+  resolved_by_absence: number;
+  ready: boolean;
+}
+
+export interface CompletionBasisStage {
+  stage: string;
+  label: string;
+  required: boolean;
+  state: StageResolutionState;
+  observed_on?: string;
+  confidence?: number;
+  reason?: AbsenceReasonKey;
+  basis?: string;
+  recorded_at?: string;
+}
+
+export interface CompletionBasis {
+  rule_version: number;
+  legacy: boolean;
+  basis_text: string;
+  observed_required_count: number;
+  not_applicable_required_count: number;
+  required_total: number;
+  stages: readonly CompletionBasisStage[];
+  frozen_at: string;
 }
 
 export interface PlotSummary {
@@ -79,6 +147,9 @@ export interface ObservationSummary {
     }
   >;
   entries: readonly StageEntry[];
+  absence_markers: readonly AbsenceMarker[];
+  completion_readiness: CompletionReadiness | null;
+  completion_basis: CompletionBasis | null;
 }
 
 export interface StageOffset {

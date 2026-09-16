@@ -10,7 +10,7 @@ from ..application import (
     ComparisonService,
     ObservationService,
 )
-from ..domain.stages import STAGES
+from ..domain.stages import STAGES, absence_reason_catalog
 from ..errors import ValidationError
 from ..jobs import JobService
 from ..persistence import Repository
@@ -54,7 +54,8 @@ class ApiHandlers:
                     "required_for_completion": stage.required_for_completion,
                 }
                 for stage in STAGES
-            ]
+            ],
+            "absence_reasons": absence_reason_catalog(),
         }
 
     def list_plots(
@@ -162,6 +163,26 @@ class ApiHandlers:
         body: dict[str, Any],
     ) -> dict[str, Any]:
         return self.observations.remove_stage(
+            params["observation_id"],
+            params["stage"],
+            body,
+        )
+
+    def put_observation_absence(
+        self,
+        *,
+        params: dict[str, str],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.observations.put_absence(params["observation_id"], body)
+
+    def remove_observation_absence(
+        self,
+        *,
+        params: dict[str, str],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.observations.remove_absence(
             params["observation_id"],
             params["stage"],
             body,
@@ -464,6 +485,22 @@ def build_router(handlers: ApiHandlers) -> Router:
         "DELETE",
         "/api/observations/{observation_id}/stages/{stage}",
         handlers.remove_observation_stage,
+        capability="observation:write",
+        resource_kind="observation",
+        resource_id_param="observation_id",
+    )
+    router.add(
+        "PUT",
+        "/api/observations/{observation_id}/absences",
+        handlers.put_observation_absence,
+        capability="observation:write",
+        resource_kind="observation",
+        resource_id_param="observation_id",
+    )
+    router.add(
+        "DELETE",
+        "/api/observations/{observation_id}/absences/{stage}",
+        handlers.remove_observation_absence,
         capability="observation:write",
         resource_kind="observation",
         resource_id_param="observation_id",

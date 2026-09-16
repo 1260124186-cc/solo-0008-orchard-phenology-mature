@@ -1269,7 +1269,8 @@ select {
   display: none;
 }
 
-.stage-track__item.is-done::before {
+.stage-track__item.is-done::before,
+.stage-track__item.is-observed::before {
   background: #91aa95;
 }
 
@@ -1286,7 +1287,8 @@ select {
   border-radius: 50%;
 }
 
-.stage-track__item.is-done .stage-track__node {
+.stage-track__item.is-done .stage-track__node,
+.stage-track__item.is-observed .stage-track__node {
   color: white;
   background: var(--moss);
   border-color: var(--moss);
@@ -1295,6 +1297,42 @@ select {
 .stage-track__item.is-missing-required .stage-track__node {
   color: var(--vermilion);
   border-color: #c97b6d;
+}
+
+/* 当年不适用：赭色，表示经依据确认本季不发生 */
+.stage-track__item.is-not_applicable .stage-track__node {
+  color: white;
+  background: var(--ochre);
+  border-color: var(--ochre);
+}
+
+.stage-track__item.is-not_applicable::before {
+  background: #c8ad82;
+}
+
+/* 未观察到 / 依据不足：朱红描边，明确不是完成依据 */
+.stage-track__item.is-unobserved .stage-track__node,
+.stage-track__item.is-basis_incomplete .stage-track__node {
+  color: var(--vermilion);
+  border-color: #c97b6d;
+  background: var(--vermilion-soft);
+}
+
+/* 仍在核实：蓝色待办语义 */
+.stage-track__item.is-pending_verification .stage-track__node {
+  color: var(--blue-ink);
+  border-color: #8aa7b6;
+  background: #e3edf1;
+}
+
+.stage-track__item.is-unobserved .stage-track__copy small,
+.stage-track__item.is-pending_verification .stage-track__copy small,
+.stage-track__item.is-basis_incomplete .stage-track__copy small {
+  color: var(--vermilion);
+}
+
+.stage-track__item.is-not_applicable .stage-track__copy small {
+  color: var(--ochre);
 }
 
 .stage-track__copy {
@@ -1403,8 +1441,212 @@ select {
   margin-top: 11px;
 }
 
+.absence-panel {
+  margin-top: 16px;
+  padding: 15px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ochre);
+  border-radius: 7px;
+}
+
+.absence-panel__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--ochre);
+}
+
+.absence-panel__heading h4 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.absence-panel__heading p {
+  margin: 3px 0 0;
+  color: var(--ink-faint);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.absence-list {
+  display: grid;
+  gap: 8px;
+  margin: 13px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.absence-list__item {
+  padding: 9px 11px;
+  background: var(--paper-deep);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 5px;
+}
+
+.absence-list__item.is-not_applicable {
+  border-left-color: var(--ochre);
+  background: var(--ochre-soft);
+}
+
+.absence-list__item.is-unobserved {
+  border-left-color: var(--vermilion);
+}
+
+.absence-list__item.is-pending_verification {
+  border-left-color: var(--blue-ink);
+  background: #e9f0f3;
+}
+
+.absence-list__item > div {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.absence-list__item strong {
+  font-size: 11px;
+}
+
+.absence-list__reason {
+  padding: 1px 7px;
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 9px;
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 9px;
+}
+
+.absence-list__item p {
+  margin: 5px 0 4px;
+  color: var(--ink-soft);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.absence-list__actions {
+  display: flex;
+  gap: 12px;
+}
+
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  color: var(--moss);
+  background: none;
+  border: none;
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.text-button--danger {
+  color: var(--vermilion);
+}
+
+.absence-form {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.absence-form__hint {
+  margin: 7px 0 0;
+  color: var(--ink-faint);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+}
+
+.absence-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 11px;
+}
+
+.completion-basis {
+  margin-top: 18px;
+  padding: 15px 17px;
+  background: #f5f1e7;
+  border: 1px solid #ddcfae;
+  border-left: 3px solid var(--ochre);
+  border-radius: 7px;
+}
+
+.completion-basis header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ochre);
+}
+
+.completion-basis h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.completion-basis__text {
+  margin: 8px 0 10px;
+  color: var(--ink-soft);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.completion-basis__list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.completion-basis__list li {
+  display: flex;
+  gap: 10px;
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+}
+
+.completion-basis__list strong {
+  min-width: 64px;
+  color: var(--moss-dark);
+}
+
+.completion-basis__list li[data-stage-state="not_applicable"] span {
+  color: var(--ochre);
+}
+
 .completion-band {
   margin-top: 16px;
+}
+
+.completion-band__missing {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 1em;
+  color: var(--vermilion);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  list-style: disc;
+}
+
+.observation-index__basis {
+  margin-top: 2px;
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .comparison-surface,

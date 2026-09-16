@@ -140,7 +140,7 @@ node scripts/workflow_check.mjs --workflow compare
 ```
 
 - `catalog`：建立园区、加入植株、确认园区并核对服务端状态。
-- `observe`：建立季节志、补录四个必需阶段、完成并核对冻结结果。
+- `observe`：建立季节志，补录阶段与缺失说明，按真实原因完成并核对冻结依据与旧记录解释。
 - `compare`：准备两份同年已完成季节志，在页面生成比较并核对四条阶段偏移。
 
 检查结束后会关闭服务、浏览器和临时数据目录。
@@ -171,6 +171,8 @@ node scripts/workflow_check.mjs --workflow compare
 - `PATCH /api/observations/{id}`：修订草稿季节志说明。
 - `PUT /api/observations/{id}/stages`：补录物候阶段。
 - `DELETE /api/observations/{id}/stages/{stage}`：移除草稿中的阶段。
+- `PUT /api/observations/{id}/absences`：为缺失阶段登记原因与依据（未观察到 / 当年不适用 / 仍在核实）。
+- `DELETE /api/observations/{id}/absences/{stage}`：移除草稿中的缺失说明。
 - `PUT /api/observations/{id}/complete`：完成并冻结季节志。
 - `GET|PUT /api/comparisons`：查询或生成对比图谱。
 - `GET /api/briefs` 与 `GET /api/briefs/{brief_id}`：查询编研简报。
@@ -181,8 +183,9 @@ node scripts/workflow_check.mjs --workflow compare
 - 园区确认后不能直接修改基础信息；本基线不提供重新打开动作。
 - 同一园区内植株编号唯一；定植年份不能早于园区起始种植年份。
 - 同一植株、同一年份只能建立一份季节志。
-- 完成后季节志不可增删阶段；完成前必须包含萌芽期、盛花期、坐果期和采收期。
-- 比较只使用双方共同阶段，年份不同、状态未完成或无共同阶段时拒绝生成。
+- 完成后季节志不可增删阶段或缺失说明；完成前每个必需阶段（萌芽期、盛花期、坐果期、采收期）必须有实际观察，或登记依据不少于 10 个字的“当年不适用”说明；“未观察到”和“仍在核实”不能替代观察。
+- 缺失原因与依据在完成时冻结为完成依据；特性上线前已完成的旧季节志继续沿用当时判断，只标注旧口径，不按新规则重新解释。
+- 比较只使用双方共同的实际观察阶段，缺失说明不补零、不推断日期；年份不同、状态未完成或无共同观察阶段时拒绝生成。
 - 业务写入和审计、outbox、对象版本在同一 SQLite 事务中提交。
 - 修改类接口使用对象 `revision` 执行乐观并发控制，旧修订号返回冲突错误。
 - 已提交写入可通过 `X-Idempotency-Key` 安全重试，同一键不能复用于不同请求。

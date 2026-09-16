@@ -7,15 +7,29 @@ import {
   Eraser,
   LoaderCircle,
   Plus,
+  ScrollText,
   Sprout,
 } from "@lucide/vue";
 import EmptyState from "../components/EmptyState.vue";
 import ChoiceField from "../components/ChoiceField.vue";
 import ObservationStageForm from "../components/ObservationStageForm.vue";
+import AbsenceMarkerForm from "../components/AbsenceMarkerForm.vue";
 import StageTrack from "../components/StageTrack.vue";
-import { formatTimestamp, missingRequiredStages } from "../domain/rules";
-import { completedProgress, stageLabel } from "../domain/stages";
-import type { ObservationSummary, TreeRecord } from "../domain/types";
+import {
+  completionBlockers,
+  formatTimestamp,
+  observationCompletionText,
+} from "../domain/rules";
+import {
+  completedProgress,
+  resolutionStateLabel,
+  stageLabel,
+} from "../domain/stages";
+import type {
+  AbsenceReasonKey,
+  ObservationSummary,
+  TreeRecord,
+} from "../domain/types";
 import { useWorkspace } from "../app/workspace";
 
 const workspace = useWorkspace();
@@ -115,17 +129,48 @@ async function removeStage(stage: string) {
   );
 }
 
+async function saveAbsence(payload: {
+  stage: string;
+  reason: AbsenceReasonKey;
+  basis: string;
+}) {
+  const current = workspace.selectedObservation.value;
+  if (!current) return;
+  const isEdit = current.absence_markers.some(
+    (marker) => marker.stage === payload.stage,
+  );
+  await workspace.runAction(
+    () => workspace.putAbsence(current, payload),
+    isEdit ? "缺失说明已更新" : "缺失说明已登记",
+  );
+}
+
+async function removeAbsence(stage: string) {
+  const current = workspace.selectedObservation.value;
+  if (!current) return;
+  await workspace.runAction(
+    () => workspace.removeAbsence(current, stage),
+    "缺失说明已移除",
+  );
+}
+
+const completionHints = computed(() => {
+  const current = selectedObservation.value;
+  if (!current || current.status !== "open") return [];
+  return completionBlockers(current).map((blocker) => blocker.message);
+});
+
 async function completeObservation() {
   const current = workspace.selectedObservation.value;
   if (!current) return;
-  const missing = missingRequiredStages(current);
-  if (missing.length) {
-    workspace.pushNotice("error", `还需记录：${missing.join("、")}`);
+  const blockers = completionBlockers(current);
+  if (blockers.length) {
+    workspace.pushNotice("error", blockers[0].message);
     return;
   }
   await workspace.runAction(
     () => workspace.completeObservation(current),
-    "季节志已完成并冻结",
+    "季节志已完成并冻结，完成依据已随季节志保存",
   );
 }
 </script>
@@ -173,13 +218,13 @@ async function completeObservation() {
 
         <div class="progress-ribbon">
           <div>
-            <strong>{{ completedProgress(selectedObservation.entries) }}%</strong>
-            <span>完成所需阶段</span>
+            <strong>{{ completedProgress(selectedObservation) }}%</strong>
+            <span>必需阶段已落实（观察或不适用依据）</span>
           </div>
           <div class="progress-ribbon__bar">
             <i
               :style="{
-                width: `${completedProgress(selectedObservation.entries)}%`,
+                width: `${completedProgress(selectedObservation)}%`,
               }"
             />
           </div>
@@ -197,6 +242,7 @@ async function completeObservation() {
             :key="entry.id"
             class="stage-book__row"
             data-check="stage-entry"
+            :data-stage="entry.stage"
           >
             <span class="stage-book__stage">{{ stageLabel(entry.stage) }}</span>
             <span>{{ entry.observed_on }}</span>
@@ -215,6 +261,46 @@ async function completeObservation() {
           </div>
         </div>
 
+        <AbsenceMarkerForm
+          v-if="selectedObservation.status === 'open'"
+          :observation="selectedObservation"
+          @save="saveAbsence"
+          @remove="removeAbsence"
+        />
+
+        <section
+          v-else-if="selectedObservation.completion_basis"
+          class="completion-basis"
+          data-check="completion-basis"
+        >
+          <header>
+            <ScrollText :size="17" />
+            <h4>完成依据{{ selectedObservation.completion_basis.legacy ? "（旧季节志）" : "" }}</h4>
+          </header>
+          <p class="completion-basis__text" data-check="completion-basis-text">
+            {{ selectedObservation.completion_basis.basis_text }}
+          </p>
+          <ul class="completion-basis__list">
+            <li
+              v-for="stage in selectedObservation.completion_basis.stages.filter((item) => item.required)"
+              :key="stage.stage"
+              :data-stage="stage.stage"
+              :data-stage-state="stage.state"
+            >
+              <strong>{{ stage.label }}</strong>
+              <template v-if="stage.state === 'observed'">
+                <span>{{ stage.observed_on }} 实际观察</span>
+              </template>
+              <template v-else-if="stage.state === 'not_applicable'">
+                <span>当年不适用 · {{ stage.basis }}</span>
+              </template>
+              <template v-else>
+                <span>{{ resolutionStateLabel(stage.state) }}</span>
+              </template>
+            </li>
+          </ul>
+        </section>
+
         <ObservationStageForm
           v-if="selectedObservation.status === 'open'"
           :observation="selectedObservation"
@@ -224,12 +310,18 @@ async function completeObservation() {
         <div v-if="selectedObservation.status === 'open'" class="completion-band">
           <div>
             <Check :size="20" />
-            <span>完成前需具备萌芽期、盛花期、坐果期与采收期。</span>
+            <span v-if="completionHints.length === 0">
+              必需阶段均已落实：有实际观察，或附有充分依据的“当年不适用”说明。
+            </span>
+            <ul v-else class="completion-band__missing" data-check="completion-blockers">
+              <li v-for="hint in completionHints" :key="hint">{{ hint }}</li>
+            </ul>
           </div>
           <button
             type="button"
             class="button button--primary"
             data-check="complete-season"
+            :disabled="completionHints.length > 0"
             @click="completeObservation"
           >
             <Check :size="17" />
@@ -343,6 +435,10 @@ async function completeObservation() {
           <span>
             <strong>{{ observation.season }} · {{ observation.tree_code }}</strong>
             <small>{{ observation.cultivar }}</small>
+            <small
+              class="observation-index__basis"
+              data-check="observation-basis-line"
+            >{{ observationCompletionText(observation) }}</small>
           </span>
           <CircleDashed v-if="observation.status === 'open'" :size="14" />
         </button>

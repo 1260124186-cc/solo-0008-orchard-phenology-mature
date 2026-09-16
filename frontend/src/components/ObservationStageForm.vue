@@ -7,7 +7,10 @@ import type { ObservationSummary, StageEntry } from "../domain/types";
 import ChoiceField from "./ChoiceField.vue";
 
 const props = defineProps<{
-  observation: Pick<ObservationSummary, "entries">;
+  observation: Pick<
+    ObservationSummary,
+    "entries" | "absence_markers"
+  >;
 }>();
 
 const emit = defineEmits<{
@@ -23,13 +26,21 @@ const form = reactive({
 });
 const errors = ref<string[]>([]);
 const stageChoices = computed(() =>
-  STAGES.map((stage) => ({
-    value: stage.key,
-    label: `${stage.label}${stage.required_for_completion ? " · 完成所需" : ""}`,
-    disabled: props.observation.entries.some(
+  STAGES.map((stage) => {
+    const observed = props.observation.entries.some(
       (entry) => entry.stage === stage.key,
-    ),
-  })),
+    );
+    const marked = props.observation.absence_markers?.some(
+      (marker) => marker.stage === stage.key,
+    );
+    return {
+      value: stage.key,
+      label: `${stage.label}${stage.required_for_completion ? " · 完成所需" : ""}${
+        marked ? " · 已有缺失说明" : ""
+      }`,
+      disabled: observed || marked,
+    };
+  }),
 );
 
 function submit() {
