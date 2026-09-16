@@ -109,6 +109,15 @@ export function useWorkspace() {
     return (await api.createPlot(payload)) as PlotSummary;
   }
 
+  async function updatePlot(
+    plotId: string,
+    payload: Record<string, unknown>,
+  ): Promise<PlotDetail> {
+    const updated = (await api.updatePlot(plotId, payload)) as PlotDetail;
+    await Promise.all([loadPlot(plotId), refreshPlots()]);
+    return updated;
+  }
+
   async function createTree(payload: Record<string, unknown>): Promise<void> {
     await api.createTree(payload);
     if (state.selectedPlotId) {
@@ -334,6 +343,7 @@ export function useWorkspace() {
     refreshComparisons,
     loadPlot,
     createPlot,
+    updatePlot,
     createTree,
     confirmSelectedPlot,
     startObservation,

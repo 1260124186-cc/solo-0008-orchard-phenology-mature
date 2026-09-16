@@ -9,6 +9,7 @@ from ..domain.code_correction import (
     build_identity_report,
     build_plot_code_plan,
     repair_tree_code,
+    update_plot_with_code_cascade,
 )
 from ..domain.plot_rules import (
     confirm_plot_record,
@@ -36,6 +37,7 @@ PLOT_UPDATE_FIELDS = {
     "planting_year",
     "note",
     "revision",
+    "code_correction_reason",
 }
 
 
@@ -121,17 +123,35 @@ class CatalogService:
                     "note": payload.get("note", plot["note"]),
                 }
             )
-            ensure_unique_plot_code(
-                state["plots"],
-                normalized["code"],
-                excluded_id=plot_id,
-            )
-            updated = update_plot_record(
-                plot,
-                payload,
-                expected_revision=payload["revision"],
-            )
-            state["plots"][plot_id] = updated
+
+            if normalized["code"] != plot["code"]:
+                # 编号变化时必须走与编号修正同一套原子级联：先在事务内校验
+                # 全部阻断条件，通过后一次性改写园区与关联植株；任何阻断都
+                # 整体回滚，绝不留下园区已换号、植株仍旧号的半成品。
+                reason = str(payload.get("code_correction_reason") or "").strip()
+                if not reason:
+                    reason = f"随园区信息修改自动级联：{plot['code']} → {normalized['code']}"
+                updated, _report = update_plot_with_code_cascade(
+                    state,
+                    plot_id,
+                    normalized,
+                    new_code=normalized["code"],
+                    reason=reason[:200],
+                    actor_id=current_request_context().actor_id or "anonymous",
+                    expected_revision=payload["revision"],
+                )
+            else:
+                ensure_unique_plot_code(
+                    state["plots"],
+                    normalized["code"],
+                    excluded_id=plot_id,
+                )
+                updated = update_plot_record(
+                    plot,
+                    payload,
+                    expected_revision=payload["revision"],
+                )
+                state["plots"][plot_id] = updated
             tree_count = sum(
                 1
                 for tree in state["trees"].values()

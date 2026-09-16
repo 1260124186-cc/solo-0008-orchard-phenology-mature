@@ -12,6 +12,7 @@ import {
 } from "@lucide/vue";
 import EmptyState from "../components/EmptyState.vue";
 import PlotForm from "../components/PlotForm.vue";
+import PlotInfoForm from "../components/PlotInfoForm.vue";
 import TreeCard from "../components/TreeCard.vue";
 import TreeForm from "../components/TreeForm.vue";
 import CodeCorrectionPanel from "../components/CodeCorrectionPanel.vue";
@@ -163,6 +164,11 @@ function selectTree(tree: { id: string }) {
             </p>
           </div>
         </div>
+
+        <PlotInfoForm
+          v-if="selectedPlot.status === 'draft'"
+          :plot="selectedPlot"
+        />
 
         <div class="tree-section">
           <div class="section-heading section-heading--compact">

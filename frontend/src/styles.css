@@ -981,6 +981,24 @@ button:disabled {
   font-size: 11px;
 }
 
+.plot-edit {
+  margin: 12px 0;
+}
+
+.plot-edit__toggle {
+  margin-bottom: 8px;
+}
+
+.plot-edit__hint {
+  margin: 0 0 10px;
+  padding: 8px 11px;
+  color: var(--ochre);
+  background: var(--ochre-soft);
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .tree-card__side {
   text-align: right;
 }

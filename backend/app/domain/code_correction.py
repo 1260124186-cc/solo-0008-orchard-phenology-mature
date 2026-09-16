@@ -234,8 +234,122 @@ def apply_plot_code_correction(
     new_code = plan["new_code"]
     assert new_code is not None
 
+    tree_results = apply_tree_cascade(
+        state,
+        plan["changes"],
+        new_code=new_code,
+        reason=reason,
+        actor_id=actor_id,
+        timestamp=timestamp,
+        cause="plot_code_correction",
+    )
+
+    updated_plot = append_plot_alias(
+        state["plots"][plot_id],
+        old_code=plan["plot_code"],
+        new_code=new_code,
+        reason=reason,
+        actor_id=actor_id,
+        timestamp=timestamp,
+        cause="plot_code_correction",
+    )
+    state["plots"][plot_id] = updated_plot
+
+    report = build_correction_report(
+        plot_id=plot_id,
+        old_code=plan["plot_code"],
+        new_code=new_code,
+        reason=reason,
+        tree_results=tree_results,
+        timestamp=timestamp,
+    )
+    report["revision"] = updated_plot["revision"]
+    return updated_plot, report
+
+
+def update_plot_with_code_cascade(
+    state: dict[str, Any],
+    plot_id: str,
+    merged_fields: dict[str, Any],
+    *,
+    new_code: str,
+    reason: str,
+    actor_id: str,
+    expected_revision: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """在同一事务内完成常规字段更新与编号级联。
+
+    供普通园区信息修改入口（PATCH）在检测到编号变化时使用：先构建计划并
+    校验全部阻断条件，通过后一次性写入园区新编号、别名轨迹和关联植株的
+    新编号；阻断则整体抛错，由调用方回滚，绝不留下园区已换号而植株仍旧
+    号的中间状态。园区只增加一次修订号。
+    """
+    plan = build_plot_code_plan(state, plot_id, new_code)
+    verify_revision(state["plots"][plot_id], expected_revision)
+    _raise_for_blockers(plan)
+    assert plan["new_code"] is not None
+
+    timestamp = now_iso()
+    current = state["plots"][plot_id]
+    updated_plot = {
+        **current,
+        **merged_fields,
+        "code": plan["new_code"],
+        "code_aliases": [
+            *current.get("code_aliases", []),
+            {
+                "code": plan["plot_code"],
+                "changed_to": plan["new_code"],
+                "reason": reason,
+                "actor_id": actor_id,
+                "changed_at": timestamp,
+                "cause": "plot_update_code_cascade",
+            },
+        ],
+        "revision": int(current["revision"]) + 1,
+        "updated_at": timestamp,
+    }
+    state["plots"][plot_id] = updated_plot
+
+    tree_results = apply_tree_cascade(
+        state,
+        plan["changes"],
+        new_code=plan["new_code"],
+        reason=reason,
+        actor_id=actor_id,
+        timestamp=timestamp,
+        cause="plot_update_code_cascade",
+    )
+
+    report = build_correction_report(
+        plot_id=plot_id,
+        old_code=plan["plot_code"],
+        new_code=plan["new_code"],
+        reason=reason,
+        tree_results=tree_results,
+        timestamp=timestamp,
+    )
+    report["revision"] = updated_plot["revision"]
+    return updated_plot, report
+
+
+def apply_tree_cascade(
+    state: dict[str, Any],
+    changes: list[dict[str, Any]],
+    *,
+    new_code: str,
+    reason: str,
+    actor_id: str,
+    timestamp: str,
+    cause: str,
+) -> list[dict[str, Any]]:
+    """按计划批量改写植株编号并追加别名轨迹。
+
+    只处理 ``changes`` 中列出、当前前缀与旧园区编号一致的植株；未决植株
+    不在其中，因此不会被悄悄改名。
+    """
     tree_results: list[dict[str, Any]] = []
-    for change in plan["changes"]:
+    for change in changes:
         tree = state["trees"][change["tree_id"]]
         previous_code = tree["code"]
         updated = {
@@ -249,7 +363,7 @@ def apply_plot_code_correction(
                     "reason": reason,
                     "actor_id": actor_id,
                     "changed_at": timestamp,
-                    "cause": "plot_code_correction",
+                    "cause": cause,
                 },
             ],
             "revision": int(tree["revision"]) + 1,
@@ -265,32 +379,53 @@ def apply_plot_code_correction(
                 "status": updated["status"],
             }
         )
+    return tree_results
 
-    updated_plot = {
+
+def append_plot_alias(
+    plot: dict[str, Any],
+    *,
+    old_code: str,
+    new_code: str,
+    reason: str,
+    actor_id: str,
+    timestamp: str,
+    cause: str,
+) -> dict[str, Any]:
+    return {
         **plot,
         "code": new_code,
         "code_aliases": [
             *plot.get("code_aliases", []),
             {
-                "code": plan["plot_code"],
+                "code": old_code,
                 "changed_to": new_code,
                 "reason": reason,
                 "actor_id": actor_id,
                 "changed_at": timestamp,
-                "cause": "plot_code_correction",
+                "cause": cause,
             },
         ],
         "revision": int(plot["revision"]) + 1,
         "updated_at": timestamp,
     }
-    state["plots"][plot_id] = updated_plot
 
-    report = {
+
+def build_correction_report(
+    *,
+    plot_id: str,
+    old_code: str,
+    new_code: str,
+    reason: str,
+    tree_results: list[dict[str, Any]],
+    timestamp: str,
+) -> dict[str, Any]:
+    return {
         "plot_id": plot_id,
-        "old_code": plan["plot_code"],
+        "old_code": old_code,
         "new_code": new_code,
         "reason": reason,
-        "revision": updated_plot["revision"],
+        "revision": 0,
         "trees": tree_results,
         "unchanged_objects": [],
         "historical_objects": [
@@ -305,7 +440,6 @@ def apply_plot_code_correction(
         ],
         "applied_at": timestamp,
     }
-    return updated_plot, report
 
 
 def repair_tree_code(

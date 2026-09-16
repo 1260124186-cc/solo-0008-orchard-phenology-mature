@@ -94,6 +94,22 @@ async function checkCatalog(page) {
   await page.getByText("植株已加入园区").waitFor();
   await page.locator('[data-check="tree-card"]').first().waitFor();
 
+  // 普通园区信息编辑：只改名称等字段，编号与植株编号不受影响。
+  await page.locator('[data-check="plot-edit-toggle"]').click();
+  await page.locator('[data-check="plot-edit-name"]').fill("北岭老梨园（核定）");
+  await page.locator('[data-check="plot-edit-save"]').click();
+  await page.getByText("园区基础信息已更新").waitFor();
+  const edited = (await api("/plots?q=OR-2101")).items[0];
+  if (edited.name !== "北岭老梨园（核定）" || edited.code !== "OR-2101") {
+    throw new Error("普通字段编辑后园区名称或编号不符合预期");
+  }
+  let editedTrees = await api(
+    `/trees?plot_id=${encodeURIComponent(edited.id)}`,
+  );
+  if (editedTrees.items.length !== 1 || editedTrees.items[0].code !== "OR-2101-T01") {
+    throw new Error("普通字段编辑不应改动植株编号");
+  }
+
   // 编号修正：验证未决植株阻断、页面内归位、重复编号阻断和整批级联。
   await checkCodeCorrection(page, runtimeDir);
 

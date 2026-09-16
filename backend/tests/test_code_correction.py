@@ -460,6 +460,134 @@ class CodeCorrectionTests(unittest.TestCase):
         )
         self.assertTrue(brief_history["explainable"])
 
+    def test_patch_plot_code_change_cascades_atomically(self) -> None:
+        """普通园区修改入口改编号时，必须与级联同一事务、同一修订号。"""
+        plot = self._plot("OR-5101")
+        first = self._tree(plot["id"], "OR-5101-T01")
+        second = self._tree(plot["id"], "OR-5101-T02")
+        revision_before = self.repository.read()["revision"]
+
+        with _context(method="PATCH", path="/api/plots/x"):
+            result = self.catalog.update_plot(
+                plot["id"],
+                {
+                    "code": "OR-5202",
+                    "name": "改名同时改编号",
+                    "revision": plot["revision"],
+                },
+            )
+
+        self.assertEqual(result["code"], "OR-5202")
+        self.assertEqual(result["name"], "改名同时改编号")
+        state = self.repository.read()
+        self.assertEqual(state["plots"][plot["id"]]["code"], "OR-5202")
+        self.assertEqual(
+            sorted(tree["code"] for tree in state["trees"].values()),
+            ["OR-5202-T01", "OR-5202-T02"],
+        )
+        # 园区只增加一次修订号，全部对象在同一事务提交。
+        self.assertEqual(state["plots"][plot["id"]]["revision"], 2)
+        self.assertEqual(state["trees"][first["id"]]["revision"], 2)
+        self.assertEqual(state["trees"][second["id"]]["revision"], 2)
+        self.assertEqual(state["revision"], revision_before + 1)
+        cause = state["plots"][plot["id"]]["code_aliases"][0]["cause"]
+        self.assertEqual(cause, "plot_update_code_cascade")
+
+    def test_patch_plot_code_change_blocked_leaves_no_half_state(self) -> None:
+        """PATCH 改编号遇到重复或未决植株时整体拒绝，不换园区编号。"""
+        plot = self._plot("OR-5301")
+        self._tree(plot["id"], "OR-5301-T01")
+        stray = self._tree(plot["id"], "OR-5301-T02")
+
+        def mutate(state: dict) -> None:
+            tree = state["trees"][stray["id"]]
+            state["trees"][stray["id"]] = {**tree, "code": "ZZ-9010-T02"}
+
+        self.repository.atomic_update(mutate)
+        revision_before = self.repository.read()["revision"]
+
+        with _context(method="PATCH", path="/api/plots/x"):
+            with self.assertRaises(PreconditionError) as raised:
+                self.catalog.update_plot(
+                    plot["id"],
+                    {"code": "OR-5401", "name": "不应落库", "revision": plot["revision"]},
+                )
+        self.assertEqual(raised.exception.code, "tree_code_unresolved")
+        pending = raised.exception.details["pending"]
+        self.assertEqual(pending[0]["tree_id"], stray["id"])
+
+        state = self.repository.read()
+        record = state["plots"][plot["id"]]
+        self.assertEqual(record["code"], "OR-5301")
+        self.assertNotEqual(record["name"], "不应落库")
+        self.assertEqual(
+            sorted(tree["code"] for tree in state["trees"].values()),
+            ["OR-5301-T01", "ZZ-9010-T02"],
+        )
+        self.assertEqual(state["revision"], revision_before)
+
+    def test_patch_duplicate_code_change_rejects_without_partial_update(self) -> None:
+        plot = self._plot("OR-5501")
+        self._tree(plot["id"], "OR-5501-T01")
+        self._plot("OR-5502")
+        revision_before = self.repository.read()["revision"]
+
+        with _context(method="PATCH", path="/api/plots/x"):
+            with self.assertRaises(ConflictError) as raised:
+                self.catalog.update_plot(
+                    plot["id"],
+                    {"code": "OR-5502", "revision": plot["revision"]},
+                )
+        self.assertEqual(raised.exception.code, "plot_code_exists")
+        state = self.repository.read()
+        self.assertEqual(state["plots"][plot["id"]]["code"], "OR-5501")
+        self.assertEqual(
+            next(iter(state["trees"].values()))["code"],
+            "OR-5501-T01",
+        )
+        self.assertEqual(state["revision"], revision_before)
+
+    def test_patch_cascade_concurrent_revision_conflict_leaves_no_change(self) -> None:
+        plot = self._plot("OR-5601")
+        self._tree(plot["id"], "OR-5601-T01")
+        revision_before = self.repository.read()["revision"]
+
+        # 其他请求先推进园区修订号。
+        with _context(method="PATCH", path="/api/plots/x"):
+            self.catalog.update_plot(
+                plot["id"],
+                {"name": "并行修改", "revision": plot["revision"]},
+            )
+
+        with _context(method="PATCH", path="/api/plots/x"):
+            with self.assertRaises(ConflictError) as raised:
+                self.catalog.update_plot(
+                    plot["id"],
+                    {"code": "OR-5701", "revision": plot["revision"]},
+                )
+        self.assertEqual(raised.exception.code, "revision_conflict")
+        state = self.repository.read()
+        self.assertEqual(state["plots"][plot["id"]]["code"], "OR-5601")
+        self.assertEqual(
+            next(iter(state["trees"].values()))["code"],
+            "OR-5601-T01",
+        )
+        self.assertEqual(state["revision"], revision_before + 1)
+
+    def test_patch_without_code_change_keeps_original_behaviour(self) -> None:
+        plot = self._plot("OR-5801")
+        tree = self._tree(plot["id"], "OR-5801-T01")
+        with _context(method="PATCH", path="/api/plots/x"):
+            updated = self.catalog.update_plot(
+                plot["id"],
+                {"name": "仅改名", "revision": plot["revision"]},
+            )
+        self.assertEqual(updated["code"], "OR-5801")
+        state = self.repository.read()
+        self.assertEqual(state["plots"][plot["id"]]["code_aliases"], [])
+        self.assertEqual(state["trees"][tree["id"]]["code"], "OR-5801-T01")
+        self.assertEqual(state["trees"][tree["id"]]["revision"], 1)
+
     def test_identity_report_flags_unexplainable_history_and_duplicates(self) -> None:
         plot = self._plot("OR-4801")
         tree = self._tree(plot["id"], "OR-4801-T01")
