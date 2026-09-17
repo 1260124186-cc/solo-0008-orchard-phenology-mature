@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 from ..application import (
     BriefService,
     CatalogService,
+    CohortService,
     ComparisonService,
     ObservationService,
 )
@@ -222,6 +223,7 @@ def create_server(
     catalog = CatalogService(repository)
     observations = ObservationService(repository)
     comparisons = ComparisonService(repository)
+    cohorts = CohortService(repository)
     briefs = BriefService(repository)
     jobs = JobService(repository.database)
     identity = IdentityService(repository.database)
@@ -229,6 +231,7 @@ def create_server(
         catalog,
         observations,
         comparisons,
+        cohorts,
         briefs,
         repository,
         jobs,
@@ -259,6 +262,7 @@ def _resource_id(
         "tree_id",
         "observation_id",
         "comparison_id",
+        "cohort_id",
         "brief_id",
         "job_id",
     ):

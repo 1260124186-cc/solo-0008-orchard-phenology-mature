@@ -25,6 +25,7 @@ ENTITY_KINDS: dict[str, str] = {
     "trees": "tree",
     "observations": "observation",
     "comparisons": "comparison",
+    "cohorts": "cohort",
     "briefs": "brief",
 }
 
@@ -107,6 +108,7 @@ class Repository:
                 "tree_count": _count(connection, "tree"),
                 "observation_count": _count(connection, "observation"),
                 "comparison_count": _count(connection, "comparison"),
+                "cohort_count": _count(connection, "cohort"),
                 "brief_count": _count(connection, "brief"),
                 "event_count": int(
                     connection.execute(

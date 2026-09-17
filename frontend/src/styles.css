@@ -392,6 +392,8 @@ button:disabled {
 .surface-column,
 .comparison-composer,
 .comparison-result,
+.cohort-composer,
+.cohort-result,
 .brief-composer,
 .brief-document {
   min-width: 0;
@@ -813,6 +815,7 @@ button:disabled {
 
 .new-plot-folio,
 .comparison-composer,
+.cohort-composer,
 .brief-composer {
   padding: 27px;
 }
@@ -820,6 +823,7 @@ button:disabled {
 .archive-form,
 .season-start-form,
 .comparison-form,
+.cohort-form,
 .brief-form {
   display: grid;
   gap: 14px;
@@ -1408,6 +1412,7 @@ select {
 }
 
 .comparison-surface,
+.cohort-surface,
 .brief-surface {
   display: grid;
   grid-template-columns: minmax(310px, 0.82fr) minmax(500px, 1.5fr);
@@ -1442,6 +1447,10 @@ select {
 }
 
 .comparison-result {
+  padding: 25px;
+}
+
+.cohort-result {
   padding: 25px;
 }
 
@@ -1622,6 +1631,135 @@ select {
   font-family: "Noto Sans SC", sans-serif;
   font-size: 10px;
   font-weight: 700;
+}
+
+.cohort-index {
+  display: grid;
+  gap: 7px;
+  margin-top: 22px;
+}
+
+.cohort-index .section-heading {
+  margin-bottom: 4px;
+}
+
+.cohort-index__item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 11px 12px;
+  text-align: left;
+  background: #f8faf5;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.cohort-index__item:hover,
+.cohort-index__item.is-active {
+  border-color: #9bb09e;
+  background: #edf3eb;
+}
+
+.cohort-index__title {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cohort-index__counts {
+  color: var(--ink-faint);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+}
+
+.cohort-section-title {
+  margin: 22px 0 10px;
+  font-size: 15px;
+}
+
+.cohort-years,
+.cohort-stages {
+  border-top: 1px solid var(--line);
+}
+
+.cohort-years__head,
+.cohort-years__row {
+  display: grid;
+  grid-template-columns: 0.55fr 0.6fr 2fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.cohort-stages__head,
+.cohort-stages__row {
+  display: grid;
+  grid-template-columns: 0.8fr 1.7fr 0.8fr 0.7fr 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.cohort-years__head,
+.cohort-stages__head {
+  min-height: 37px;
+  color: var(--ink-faint);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 9px;
+}
+
+.cohort-years__row,
+.cohort-stages__row {
+  min-height: 44px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+}
+
+.cohort-years__row strong,
+.cohort-stages__row strong {
+  font-family: "Noto Serif SC", serif;
+  font-size: 11px;
+}
+
+.year-pill {
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.year-pill.is-included {
+  color: var(--moss-dark);
+  background: var(--moss-soft);
+}
+
+.year-pill.is-excluded {
+  color: #8b3c2c;
+  background: var(--vermilion-soft);
+}
+
+.year-pill.is-missing {
+  color: var(--ochre);
+  background: var(--ochre-soft);
+}
+
+.cohort-result__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.cohort-result__footer > span {
+  color: var(--ink-faint);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
 }
 
 .brief-form {
@@ -1888,6 +2026,7 @@ select {
   }
 
   .comparison-surface,
+  .cohort-surface,
   .brief-surface {
     grid-template-columns: minmax(290px, 0.72fr) minmax(430px, 1.3fr);
   }
@@ -1929,7 +2068,7 @@ select {
   }
 
   .workspace-nav {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     padding: 0;
   }
 
@@ -1950,6 +2089,7 @@ select {
   .catalog-surface,
   .observation-surface,
   .comparison-surface,
+  .cohort-surface,
   .brief-surface {
     grid-template-columns: 1fr;
   }
@@ -2013,6 +2153,7 @@ select {
   .catalog-surface,
   .observation-surface,
   .comparison-surface,
+  .cohort-surface,
   .brief-surface {
     gap: 14px;
   }
@@ -2021,8 +2162,10 @@ select {
   .plot-folio,
   .season-sheet,
   .comparison-result,
+  .cohort-result,
   .new-plot-folio,
   .comparison-composer,
+  .cohort-composer,
   .brief-composer,
   .brief-document {
     padding: 17px;

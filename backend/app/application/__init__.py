@@ -2,12 +2,14 @@
 
 from .brief_service import BriefService
 from .catalog_service import CatalogService
+from .cohort_service import CohortService
 from .comparison_service import ComparisonService
 from .observation_service import ObservationService
 
 __all__ = [
     "BriefService",
     "CatalogService",
+    "CohortService",
     "ComparisonService",
     "ObservationService",
 ]

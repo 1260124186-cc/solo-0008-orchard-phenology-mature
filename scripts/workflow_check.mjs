@@ -13,7 +13,7 @@ const UI_ORIGIN = "http://127.0.0.1:4317";
 const workflow = valueAfter("--workflow");
 
 if (!workflow) {
-  console.error("用法：node scripts/workflow_check.mjs --workflow catalog|observe|compare");
+  console.error("用法：node scripts/workflow_check.mjs --workflow catalog|observe|compare|cohort");
   process.exit(2);
 }
 
@@ -46,6 +46,7 @@ try {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 980 },
     locale: "zh-CN",
+    acceptDownloads: true,
   });
   const page = await context.newPage();
   await page.goto(UI_ORIGIN, { waitUntil: "networkidle" });
@@ -57,6 +58,8 @@ try {
     await checkObservation(page);
   } else if (workflow === "compare") {
     await checkComparison(page);
+  } else if (workflow === "cohort") {
+    await checkCohort(page);
   } else {
     throw new Error(`未知工作流：${workflow}`);
   }
@@ -216,6 +219,118 @@ async function checkComparison(page) {
   }
 }
 
+async function checkCohort(page) {
+  const { tree } = await seedCatalog("OR-2401", "北沟梨园", "雪花梨");
+  await seedSeason(tree, "2023", [
+    "2023-03-12",
+    "2023-04-02",
+    "2023-04-20",
+    "2023-09-01",
+  ]);
+  await seedSeason(tree, "2026", [
+    "2026-03-16",
+    "2026-04-06",
+    "2026-04-25",
+    "2026-09-06",
+  ]);
+  await seedOpenSeason(tree, "2025", ["2025-03-15"]);
+
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator('[data-check="nav-cohort"]').click();
+  await page.locator('[data-check="cohort-tree"]').click();
+  await page.locator(`[data-choice-value="${tree.id}"]`).click();
+  await page.locator('[data-check="cohort-start"]').fill("2023");
+  await page.locator('[data-check="cohort-end"]').fill("2026");
+  await page.locator('[data-check="create-cohort"]').click();
+  await page.getByText("多年队列已生成并保存").waitFor();
+  await page.locator('[data-check="cohort-result"]').waitFor();
+
+  const sentence = await page
+    .locator('[data-check="cohort-sentence"]')
+    .innerText();
+  if (
+    !sentence.includes("纳入 2 年") ||
+    !sentence.includes("排除 1 年") ||
+    !sentence.includes("缺失 1 年")
+  ) {
+    throw new Error("多年队列摘要未解释纳入、排除与缺失数量");
+  }
+
+  const yearRows = page.locator('[data-check="cohort-year-row"]');
+  if ((await yearRows.count()) !== 4) {
+    throw new Error("页面未展示四个年份的明细行");
+  }
+  const rowTexts = await yearRows.allInnerTexts();
+  const rowOf = (season) =>
+    rowTexts.find((text) => text.includes(`${season}`)) ?? "";
+  if (!rowOf("2023").includes("纳入") || !rowOf("2026").includes("纳入")) {
+    throw new Error("已完成年份未标记为纳入");
+  }
+  if (!rowOf("2024").includes("缺失")) {
+    throw new Error("无记录年份未标记为缺失");
+  }
+  if (!rowOf("2025").includes("排除") || !rowOf("2025").includes("记录不可用")) {
+    throw new Error("未完成季节志未标记为排除");
+  }
+
+  const stageRows = await page
+    .locator('[data-check="cohort-stage-row"]')
+    .allInnerTexts();
+  const budBurst = stageRows.find((text) => text.includes("萌芽期")) ?? "";
+  if (!budBurst.includes("第 73 天") || budBurst.includes("2025")) {
+    throw new Error("阶段序列把缺失年份计入了统计");
+  }
+  const budSwell = stageRows.find((text) => text.includes("芽膨大期")) ?? "";
+  if (!budSwell.includes("不计算")) {
+    throw new Error("数据不足的阶段被强行求平均");
+  }
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 8000 }),
+    page.locator('[data-check="export-cohort"]').click(),
+  ]);
+  if (!download.suggestedFilename().includes("多年队列")) {
+    throw new Error("导出文件名不符合预期");
+  }
+
+  const cohorts = await api("/cohorts");
+  if (cohorts.items.length !== 1) {
+    throw new Error("服务端未保存多年队列");
+  }
+  const item = cohorts.items[0];
+  if (
+    item.summary.included_count !== 2 ||
+    item.summary.excluded_count !== 1 ||
+    item.summary.missing_count !== 1
+  ) {
+    throw new Error("比较列表的纳入统计不符合预期");
+  }
+  const detail = await api(`/cohorts/${item.id}`);
+  const year2024 = detail.years.find((year) => year.season === "2024");
+  const year2025 = detail.years.find((year) => year.season === "2025");
+  if (year2024?.reason_code !== "missing_year") {
+    throw new Error("详情未把无记录年份标记为年份缺失");
+  }
+  if (year2025?.reason_code !== "record_incomplete") {
+    throw new Error("详情未把未完成季节志标记为记录不可用");
+  }
+  const series = detail.stage_series.find((stage) => stage.stage === "bud_burst");
+  if (
+    !series?.comparable ||
+    series.points.some((point) => point.season === "2024" || point.season === "2025")
+  ) {
+    throw new Error("阶段序列混入了缺失或排除年份");
+  }
+  const exportDoc = await api(`/cohorts/${item.id}/export`);
+  if (
+    !exportDoc.content.includes("不按零值计入") ||
+    !exportDoc.content.includes("记录不可用") ||
+    !exportDoc.content.includes("2024｜缺失｜")
+  ) {
+    throw new Error("导出文本未解释纳入标准");
+  }
+}
+
 async function seedCatalog(code, name, cultivar) {
   const plot = await api("/plots", "PUT", {
     code,
@@ -247,33 +362,43 @@ async function seedCompletedSeason(config) {
     config.plotName,
     config.cultivar,
   );
-  let observation = await api("/observations", "PUT", {
-    tree_id: tree.id,
-    season: config.season,
-    observer: "对比检查组",
-    note: "",
-  });
-  const stages = ["bud_burst", "full_bloom", "fruit_set", "harvest"];
-  for (let index = 0; index < stages.length; index += 1) {
-    observation = await api(
-      `/observations/${observation.id}/stages`,
-      "PUT",
-      {
-        stage: stages[index],
-        observed_on: config.dates[index],
-        confidence: 4,
-        note: "",
-        revision: observation.revision,
-      },
-    );
+  const observation = await seedSeason(tree, config.season, config.dates);
+  if (!plot || observation.status !== "completed") {
+    throw new Error("准备比较数据失败");
   }
+  return observation;
+}
+
+async function seedSeason(tree, season, dates) {
+  let observation = await seedOpenSeason(tree, season, dates);
   observation = await api(
     `/observations/${observation.id}/complete`,
     "PUT",
     { revision: observation.revision },
   );
-  if (!plot || observation.status !== "completed") {
-    throw new Error("准备比较数据失败");
+  return observation;
+}
+
+async function seedOpenSeason(tree, season, dates) {
+  let observation = await api("/observations", "PUT", {
+    tree_id: tree.id,
+    season,
+    observer: "对比检查组",
+    note: "",
+  });
+  const stages = ["bud_burst", "full_bloom", "fruit_set", "harvest"];
+  for (let index = 0; index < dates.length; index += 1) {
+    observation = await api(
+      `/observations/${observation.id}/stages`,
+      "PUT",
+      {
+        stage: stages[index],
+        observed_on: dates[index],
+        confidence: 4,
+        note: "",
+        revision: observation.revision,
+      },
+    );
   }
   return observation;
 }

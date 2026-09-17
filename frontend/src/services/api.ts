@@ -131,6 +131,13 @@ export const api = {
   listComparisons: () => request("/comparisons"),
   createComparison: (body: unknown) =>
     request("/comparisons", { method: "PUT", ...jsonBody(body) }),
+  listCohorts: (query?: Record<string, QueryValue>) =>
+    request(`/cohorts${encodeQuery(query)}`),
+  createCohort: (body: unknown) =>
+    request("/cohorts", { method: "PUT", ...jsonBody(body) }),
+  getCohort: (id: string) => request(`/cohorts/${encodeURIComponent(id)}`),
+  exportCohort: (id: string) =>
+    request(`/cohorts/${encodeURIComponent(id)}/export`),
   listBriefs: (query?: Record<string, QueryValue>) =>
     request(`/briefs${encodeQuery(query)}`),
   createBrief: (plotId: string, title: string) =>

@@ -7,6 +7,7 @@ from typing import Any
 from ..application import (
     BriefService,
     CatalogService,
+    CohortService,
     ComparisonService,
     ObservationService,
 )
@@ -24,6 +25,7 @@ class ApiHandlers:
         catalog: CatalogService,
         observations: ObservationService,
         comparisons: ComparisonService,
+        cohorts: CohortService,
         briefs: BriefService,
         repository: Repository,
         jobs: JobService,
@@ -32,6 +34,7 @@ class ApiHandlers:
         self.catalog = catalog
         self.observations = observations
         self.comparisons = comparisons
+        self.cohorts = cohorts
         self.briefs = briefs
         self.repository = repository
         self.jobs = jobs
@@ -186,6 +189,22 @@ class ApiHandlers:
 
     def get_comparison(self, *, params: dict[str, str]) -> dict[str, Any]:
         return self.comparisons.get_comparison(params["comparison_id"])
+
+    def list_cohorts(
+        self,
+        *,
+        query: dict[str, list[str]],
+    ) -> dict[str, Any]:
+        return self.cohorts.list_cohorts(tree_id=_optional_query(query, "tree_id"))
+
+    def create_cohort(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        return self.cohorts.create_cohort(body)
+
+    def get_cohort(self, *, params: dict[str, str]) -> dict[str, Any]:
+        return self.cohorts.get_cohort(params["cohort_id"])
+
+    def export_cohort(self, *, params: dict[str, str]) -> dict[str, Any]:
+        return self.cohorts.export_cohort(params["cohort_id"])
 
     def list_briefs(
         self,
@@ -498,6 +517,37 @@ def build_router(handlers: ApiHandlers) -> Router:
         capability="comparison:read",
         resource_kind="comparison",
         resource_id_param="comparison_id",
+    )
+
+    router.add(
+        "GET",
+        "/api/cohorts",
+        handlers.list_cohorts,
+        capability="cohort:read",
+        resource_kind="cohort",
+    )
+    router.add(
+        "PUT",
+        "/api/cohorts",
+        handlers.create_cohort,
+        capability="cohort:write",
+        resource_kind="cohort",
+    )
+    router.add(
+        "GET",
+        "/api/cohorts/{cohort_id}",
+        handlers.get_cohort,
+        capability="cohort:read",
+        resource_kind="cohort",
+        resource_id_param="cohort_id",
+    )
+    router.add(
+        "GET",
+        "/api/cohorts/{cohort_id}/export",
+        handlers.export_cohort,
+        capability="cohort:read",
+        resource_kind="cohort",
+        resource_id_param="cohort_id",
     )
 
     router.add(

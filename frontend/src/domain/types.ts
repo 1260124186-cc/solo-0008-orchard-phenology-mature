@@ -1,4 +1,4 @@
-export type WorkspaceKey = "catalog" | "observation" | "comparison" | "brief";
+export type WorkspaceKey = "catalog" | "observation" | "comparison" | "cohort" | "brief";
 
 export type PlotStatus = "draft" | "confirmed";
 export type TreeStatus = "active" | "retired" | "lost";
@@ -131,6 +131,75 @@ export interface BriefSummary {
     trees: readonly TreeRecord[];
     observations: readonly ObservationSummary[];
   };
+}
+
+export type CohortYearStatus = "included" | "excluded" | "missing";
+
+export interface CohortYearEntry {
+  season: string;
+  status: CohortYearStatus;
+  reason_code: string;
+  reason: string;
+  observation_id: string | null;
+  stage_count: number;
+}
+
+export interface CohortStagePoint {
+  season: string;
+  observed_on: string;
+  season_day: number;
+  confidence: number;
+}
+
+export interface CohortStageDelta {
+  from_season: string;
+  to_season: string;
+  span_years: number;
+  days: number;
+}
+
+export interface CohortStageSeries {
+  stage: string;
+  label: string;
+  rank: number;
+  points: CohortStagePoint[];
+  missing_seasons: string[];
+  comparable: boolean;
+  average_season_day: number | null;
+  min_season_day: number | null;
+  max_season_day: number | null;
+  deltas: CohortStageDelta[];
+  trend: string;
+}
+
+export interface CohortSummary {
+  id: string;
+  title: string;
+  tree_id: string;
+  tree_code: string;
+  cultivar: string;
+  tree_label: string;
+  season_start: string;
+  season_end: string;
+  years: CohortYearEntry[];
+  stage_series: CohortStageSeries[];
+  summary: {
+    title: string;
+    season_start: string;
+    season_end: string;
+    included_count: number;
+    excluded_count: number;
+    missing_count: number;
+    comparable_stage_count: number;
+    sentence: string;
+  };
+  created_at: string;
+}
+
+export interface CohortExport {
+  filename: string;
+  media_type: string;
+  content: string;
 }
 
 export interface ListResponse<T> {

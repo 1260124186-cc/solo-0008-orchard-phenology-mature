@@ -1,6 +1,8 @@
 import { computed, reactive, readonly } from "vue";
 import { STAGES } from "../domain/stages";
 import type {
+  CohortExport,
+  CohortSummary,
   ComparisonSummary,
   ObservationSummary,
   PlotDetail,
@@ -25,6 +27,8 @@ interface WorkspaceState {
   selectedObservationId: string | null;
   comparisons: ComparisonSummary[];
   selectedComparisonId: string | null;
+  cohorts: CohortSummary[];
+  selectedCohortId: string | null;
   notices: Notice[];
   backendOnline: boolean;
 }
@@ -41,6 +45,8 @@ const state = reactive<WorkspaceState>({
   selectedObservationId: null,
   comparisons: [],
   selectedComparisonId: null,
+  cohorts: [],
+  selectedCohortId: null,
   notices: [],
   backendOnline: false,
 });
@@ -61,6 +67,10 @@ const selectedComparison = computed(() =>
   null,
 );
 
+const selectedCohort = computed(() =>
+  state.cohorts.find((item) => item.id === state.selectedCohortId) ?? null,
+);
+
 export function useWorkspace() {
   async function initialize(): Promise<void> {
     state.loading = true;
@@ -71,6 +81,7 @@ export function useWorkspace() {
         refreshPlots(),
         refreshObservations(),
         refreshComparisons(),
+        refreshCohorts(),
       ]);
     } catch (error) {
       state.backendOnline = false;
@@ -199,6 +210,35 @@ export function useWorkspace() {
     return comparison;
   }
 
+  async function refreshCohorts(): Promise<void> {
+    const response = (await api.listCohorts()) as {
+      items: CohortSummary[];
+    };
+    state.cohorts = response.items;
+    if (
+      state.selectedCohortId &&
+      !state.cohorts.some((item) => item.id === state.selectedCohortId)
+    ) {
+      state.selectedCohortId = null;
+    }
+    if (!state.selectedCohortId && state.cohorts.length > 0) {
+      state.selectedCohortId = state.cohorts[0].id;
+    }
+  }
+
+  async function createCohort(
+    payload: Record<string, unknown>,
+  ): Promise<CohortSummary> {
+    const cohort = (await api.createCohort(payload)) as CohortSummary;
+    state.selectedCohortId = cohort.id;
+    await refreshCohorts();
+    return cohort;
+  }
+
+  async function exportCohort(cohortId: string): Promise<CohortExport> {
+    return (await api.exportCohort(cohortId)) as CohortExport;
+  }
+
   async function createBrief(
     plotId: string,
     title: string,
@@ -231,6 +271,10 @@ export function useWorkspace() {
 
   function selectComparison(comparisonId: string): void {
     state.selectedComparisonId = comparisonId;
+  }
+
+  function selectCohort(cohortId: string): void {
+    state.selectedCohortId = cohortId;
   }
 
   function pushNotice(
@@ -274,11 +318,13 @@ export function useWorkspace() {
     selectedPlot,
     selectedObservation,
     selectedComparison,
+    selectedCohort,
     stages: STAGES,
     initialize,
     refreshPlots,
     refreshObservations,
     refreshComparisons,
+    refreshCohorts,
     loadPlot,
     createPlot,
     createTree,
@@ -288,11 +334,14 @@ export function useWorkspace() {
     removeStage,
     completeObservation,
     createComparison,
+    createCohort,
+    exportCohort,
     createBrief,
     setActiveWorkspace,
     selectPlot,
     selectObservation,
     selectComparison,
+    selectCohort,
     pushNotice,
     dismissNotice,
     runAction,

@@ -4,6 +4,7 @@ import {
   BookOpenText,
   CalendarRange,
   GitCompareArrows,
+  History,
   Leaf,
   LibraryBig,
   Sprout,
@@ -12,6 +13,7 @@ import ArchiveHeader from "./components/ArchiveHeader.vue";
 import ToastStack from "./components/ToastStack.vue";
 import BriefView from "./views/BriefView.vue";
 import CatalogView from "./views/CatalogView.vue";
+import CohortView from "./views/CohortView.vue";
 import ComparisonView from "./views/ComparisonView.vue";
 import ObservationView from "./views/ObservationView.vue";
 import { useWorkspace } from "./app/workspace";
@@ -37,6 +39,12 @@ const navigation = computed(() => [
     label: "图谱比较",
     detail: `${workspace.state.comparisons.length} 份对齐结果`,
     icon: GitCompareArrows,
+  },
+  {
+    key: "cohort" as WorkspaceKey,
+    label: "多年队列",
+    detail: `${workspace.state.cohorts.length} 份跨年队列`,
+    icon: History,
   },
   {
     key: "brief" as WorkspaceKey,
@@ -132,6 +140,7 @@ onMounted(() => {
         <CatalogView v-if="workspace.state.active === 'catalog'" />
         <ObservationView v-else-if="workspace.state.active === 'observation'" />
         <ComparisonView v-else-if="workspace.state.active === 'comparison'" />
+        <CohortView v-else-if="workspace.state.active === 'cohort'" />
         <BriefView v-else />
       </main>
     </div>

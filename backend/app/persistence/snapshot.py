@@ -18,6 +18,7 @@ def empty_state() -> dict[str, Any]:
         "trees": {},
         "observations": {},
         "comparisons": {},
+        "cohorts": {},
         "briefs": {},
         "events": [],
     }
@@ -35,6 +36,7 @@ def ensure_state_shape(state: Any) -> dict[str, Any]:
         "trees",
         "observations",
         "comparisons",
+        "cohorts",
         "briefs",
         "events",
     )
@@ -50,6 +52,10 @@ def ensure_state_shape(state: Any) -> dict[str, Any]:
         raise DomainError("state_corrupt", "数据快照修订号无效", 500)
     for key in expected_containers:
         value = state.get(key)
+        if value is None:
+            # 旧快照可能缺少后引入的容器，按空容器补齐。
+            state[key] = [] if key == "events" else {}
+            continue
         if key == "events":
             if not isinstance(value, list):
                 raise DomainError("state_corrupt", f"{key} 必须是数组", 500)
@@ -83,6 +89,9 @@ def check_relationships(state: dict[str, Any]) -> list[str]:
             problems.append(f"对比图谱 {comparison['id']} 缺少左侧季节志")
         if comparison["right_observation_id"] not in state["observations"]:
             problems.append(f"对比图谱 {comparison['id']} 缺少右侧季节志")
+    for cohort in state["cohorts"].values():
+        if cohort["tree_id"] not in state["trees"]:
+            problems.append(f"多年队列 {cohort['id']} 引用了不存在的植株")
     for brief in state["briefs"].values():
         if brief["plot"]["id"] not in state["plots"]:
             problems.append(f"简报 {brief['id']} 引用了不存在的园区")
