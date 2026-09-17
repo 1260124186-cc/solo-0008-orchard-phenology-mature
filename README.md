@@ -12,6 +12,7 @@
 - 植株编目：按园区维护植株编号、品种、砧木、定植年份和生长状态。
 - 季节物候：按固定阶段顺序记录日期、置信度和说明，完成后冻结。
 - 品种比较：只对两份同年已完成季节志的共同阶段计算日期偏移。
+- 多年比较：按年份范围评估同一植株，明确纳入、排除和缺失原因；缺失年份不按零值处理，不可比年份不参与平均。
 - 编研简报：冻结已确认园区在生成时点的植株与季节志摘要，并下载文本。
 
 ## 技术结构
@@ -137,11 +138,13 @@ python3 scripts/generate_dataset.py \
 node scripts/workflow_check.mjs --workflow catalog
 node scripts/workflow_check.mjs --workflow observe
 node scripts/workflow_check.mjs --workflow compare
+node scripts/workflow_check.mjs --workflow series
 ```
 
 - `catalog`：建立园区、加入植株、确认园区并核对服务端状态。
 - `observe`：建立季节志、补录四个必需阶段、完成并核对冻结结果。
 - `compare`：准备两份同年已完成季节志，在页面生成比较并核对四条阶段偏移。
+- `series`：准备同一植株的完成、草稿与缺记年份，在页面生成多年比较，从比较列表、详情和导出文本核对纳入标准与逐年处置。
 
 检查结束后会关闭服务、浏览器和临时数据目录。
 
@@ -173,6 +176,8 @@ node scripts/workflow_check.mjs --workflow compare
 - `DELETE /api/observations/{id}/stages/{stage}`：移除草稿中的阶段。
 - `PUT /api/observations/{id}/complete`：完成并冻结季节志。
 - `GET|PUT /api/comparisons`：查询或生成对比图谱。
+- `GET|PUT /api/series`：查询或生成同一植株的多年比较。
+- `GET /api/series/{series_id}`：读取多年比较详情（含纳入标准与逐年处置）。
 - `GET /api/briefs` 与 `GET /api/briefs/{brief_id}`：查询编研简报。
 - `PUT /api/plots/{plot_id}/briefs`：生成冻结简报。
 
@@ -183,6 +188,7 @@ node scripts/workflow_check.mjs --workflow compare
 - 同一植株、同一年份只能建立一份季节志。
 - 完成后季节志不可增删阶段；完成前必须包含萌芽期、盛花期、坐果期和采收期。
 - 比较只使用双方共同阶段，年份不同、状态未完成或无共同阶段时拒绝生成。
+- 多年比较把范围年份区分为纳入（已完成）、排除（未完成）和缺失（无记录），阶段平均与年际变化只基于纳入年份，缺失与排除年份不按零值处理；结果保存后不可变，可下载文本。
 - 业务写入和审计、outbox、对象版本在同一 SQLite 事务中提交。
 - 修改类接口使用对象 `revision` 执行乐观并发控制，旧修订号返回冲突错误。
 - 已提交写入可通过 `X-Idempotency-Key` 安全重试，同一键不能复用于不同请求。

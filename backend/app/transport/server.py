@@ -15,6 +15,7 @@ from ..application import (
     CatalogService,
     ComparisonService,
     ObservationService,
+    SeriesService,
 )
 from ..config import RuntimeConfig
 from ..errors import DomainError
@@ -223,6 +224,7 @@ def create_server(
     observations = ObservationService(repository)
     comparisons = ComparisonService(repository)
     briefs = BriefService(repository)
+    series = SeriesService(repository)
     jobs = JobService(repository.database)
     identity = IdentityService(repository.database)
     handlers = ApiHandlers(
@@ -233,6 +235,7 @@ def create_server(
         repository,
         jobs,
         identity,
+        series,
     )
     router = build_router(handlers)
     authorization = AuthorizationService(repository.database)

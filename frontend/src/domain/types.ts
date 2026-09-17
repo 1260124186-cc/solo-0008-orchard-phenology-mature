@@ -115,6 +115,63 @@ export interface ComparisonSummary {
   created_at: string;
 }
 
+export type SeriesDisposition = "included" | "excluded" | "missing";
+
+export interface SeriesYearDisposition {
+  season: string;
+  disposition: SeriesDisposition;
+  reason_code: string;
+  reason: string;
+  observation_id: string | null;
+  stage_count: number | null;
+  missing_stages: readonly string[] | null;
+}
+
+export interface SeriesStagePoint {
+  season: string;
+  observed_on: string;
+  day_of_year: number;
+}
+
+export interface SeriesStageRow {
+  stage: string;
+  label: string;
+  rank: number;
+  points: readonly SeriesStagePoint[];
+  covered_seasons: readonly string[];
+  missing_seasons: readonly string[];
+  average_day_of_year: number | null;
+  span_days: number | null;
+  first_season: string | null;
+  last_season: string | null;
+  shift_days: number | null;
+}
+
+export interface SeriesSummary {
+  id: string;
+  title: string;
+  tree_id: string;
+  plot_id: string;
+  tree_label: string;
+  season_from: string;
+  season_to: string;
+  criteria: readonly string[];
+  years: readonly SeriesYearDisposition[];
+  stage_series: readonly SeriesStageRow[];
+  summary: {
+    title: string;
+    evaluated_year_count: number;
+    included_count: number;
+    excluded_count: number;
+    missing_count: number;
+    included_seasons: readonly string[];
+    excluded_seasons: readonly string[];
+    missing_seasons: readonly string[];
+    sentence: string;
+  };
+  created_at: string;
+}
+
 export interface BriefSummary {
   id: string;
   title: string;

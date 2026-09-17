@@ -131,6 +131,10 @@ export const api = {
   listComparisons: () => request("/comparisons"),
   createComparison: (body: unknown) =>
     request("/comparisons", { method: "PUT", ...jsonBody(body) }),
+  listSeries: () => request("/series"),
+  createSeries: (body: unknown) =>
+    request("/series", { method: "PUT", ...jsonBody(body) }),
+  getSeries: (id: string) => request(`/series/${encodeURIComponent(id)}`),
   listBriefs: (query?: Record<string, QueryValue>) =>
     request(`/briefs${encodeQuery(query)}`),
   createBrief: (plotId: string, title: string) =>

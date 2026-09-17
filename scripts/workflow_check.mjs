@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,7 @@ const UI_ORIGIN = "http://127.0.0.1:4317";
 const workflow = valueAfter("--workflow");
 
 if (!workflow) {
-  console.error("用法：node scripts/workflow_check.mjs --workflow catalog|observe|compare");
+  console.error("用法：node scripts/workflow_check.mjs --workflow catalog|observe|compare|series");
   process.exit(2);
 }
 
@@ -57,6 +57,8 @@ try {
     await checkObservation(page);
   } else if (workflow === "compare") {
     await checkComparison(page);
+  } else if (workflow === "series") {
+    await checkSeries(page);
   } else {
     throw new Error(`未知工作流：${workflow}`);
   }
@@ -214,6 +216,134 @@ async function checkComparison(page) {
   if (comparisons.items[0].stage_offsets.length !== 4) {
     throw new Error("服务端对比阶段数不符合预期");
   }
+}
+
+async function checkSeries(page) {
+  const { tree } = await seedCatalog("OR-2401", "北沟梨园", "酥梨");
+  await seedSeasonForTree(tree, "2023", [
+    "2023-03-10",
+    "2023-04-01",
+    "2023-04-18",
+    "2023-09-02",
+  ]);
+  await seedSeasonForTree(tree, "2024", [
+    "2024-03-12",
+    "2024-04-03",
+    "2024-04-20",
+    "2024-09-01",
+  ]);
+  // 2025 年保持草稿（排除），2026 年不建立季节志（缺失）。
+  await api("/observations", "PUT", {
+    tree_id: tree.id,
+    season: "2025",
+    observer: "多年检查组",
+    note: "",
+  });
+
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator('[data-check="nav-comparison"]').click();
+  await page.locator('[data-check="series-tree"]').click();
+  await page.locator(`[data-choice-value="${tree.id}"]`).click();
+  await page.locator('[data-check="series-from"]').fill("2023");
+  await page.locator('[data-check="series-to"]').fill("2026");
+  await page.locator('[data-check="create-series"]').click();
+  await page.getByText("多年比较已生成并保存").waitFor();
+  await page.locator('[data-check="series-result"]').waitFor();
+
+  const listText = await page
+    .locator('[data-check="series-list-item"]')
+    .first()
+    .innerText();
+  for (const marker of ["纳入 2", "排除 1", "缺失 1"]) {
+    if (!listText.includes(marker)) {
+      throw new Error(`比较列表未显示预期的处置统计：${marker}`);
+    }
+  }
+
+  const criteria = page.locator('[data-check="series-criterion"]');
+  if ((await criteria.count()) !== 5) {
+    throw new Error("详情未完整展示纳入标准");
+  }
+  const yearRows = page.locator('[data-check="series-year-row"]');
+  if ((await yearRows.count()) !== 4) {
+    throw new Error("详情未展示四个年份的处置行");
+  }
+  const yearsText = await page.locator('[data-check="series-years"]').innerText();
+  for (const marker of ["纳入", "排除", "缺失", "尚未完成", "没有季节志记录"]) {
+    if (!yearsText.includes(marker)) {
+      throw new Error(`年份处置说明缺少：${marker}`);
+    }
+  }
+  const sentence = await page
+    .locator('[data-check="series-sentence"]')
+    .innerText();
+  if (!sentence.includes("不按零值处理")) {
+    throw new Error("比较摘要未说明缺失年份不按零值处理");
+  }
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator('[data-check="export-series"]').click(),
+  ]);
+  const exported = readFileSync(await download.path(), "utf-8");
+  for (const marker of [
+    "纳入标准",
+    "不按零值处理",
+    "2025｜排除",
+    "2026｜缺失",
+    "萌芽期｜覆盖 2023、2024｜平均第 70.5 天",
+  ]) {
+    if (!exported.includes(marker)) {
+      throw new Error(`导出文本缺少可解释的纳入依据：${marker}`);
+    }
+  }
+
+  const seriesList = await api("/series");
+  if (seriesList.items.length !== 1) {
+    throw new Error("服务端未保存多年比较");
+  }
+  const detail = await api(`/series/${seriesList.items[0].id}`);
+  const summary = detail.summary;
+  if (
+    summary.included_count !== 2 ||
+    summary.excluded_count !== 1 ||
+    summary.missing_count !== 1
+  ) {
+    throw new Error("服务端多年比较处置统计不符合预期");
+  }
+  const budBurst = detail.stage_series.find((row) => row.stage === "bud_burst");
+  if (
+    budBurst.average_day_of_year !== 70.5 ||
+    budBurst.covered_seasons.join(",") !== "2023,2024"
+  ) {
+    throw new Error("服务端阶段统计把缺失或排除年份计入了平均");
+  }
+}
+
+async function seedSeasonForTree(tree, season, dates) {
+  let observation = await api("/observations", "PUT", {
+    tree_id: tree.id,
+    season,
+    observer: "多年检查组",
+    note: "",
+  });
+  const stages = ["bud_burst", "full_bloom", "fruit_set", "harvest"];
+  for (let index = 0; index < stages.length; index += 1) {
+    observation = await api(`/observations/${observation.id}/stages`, "PUT", {
+      stage: stages[index],
+      observed_on: dates[index],
+      confidence: 4,
+      note: "",
+      revision: observation.revision,
+    });
+  }
+  observation = await api(`/observations/${observation.id}/complete`, "PUT", {
+    revision: observation.revision,
+  });
+  if (observation.status !== "completed") {
+    throw new Error(`准备 ${season} 年季节志失败`);
+  }
+  return observation;
 }
 
 async function seedCatalog(code, name, cultivar) {

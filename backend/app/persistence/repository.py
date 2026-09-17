@@ -25,6 +25,7 @@ ENTITY_KINDS: dict[str, str] = {
     "trees": "tree",
     "observations": "observation",
     "comparisons": "comparison",
+    "series": "series",
     "briefs": "brief",
 }
 

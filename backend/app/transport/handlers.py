@@ -9,6 +9,7 @@ from ..application import (
     CatalogService,
     ComparisonService,
     ObservationService,
+    SeriesService,
 )
 from ..domain.stages import STAGES
 from ..errors import ValidationError
@@ -28,6 +29,7 @@ class ApiHandlers:
         repository: Repository,
         jobs: JobService,
         identity: IdentityService,
+        series: SeriesService,
     ) -> None:
         self.catalog = catalog
         self.observations = observations
@@ -36,6 +38,7 @@ class ApiHandlers:
         self.repository = repository
         self.jobs = jobs
         self.identity = identity
+        self.series = series
 
     def health(self) -> dict[str, Any]:
         return {
@@ -186,6 +189,15 @@ class ApiHandlers:
 
     def get_comparison(self, *, params: dict[str, str]) -> dict[str, Any]:
         return self.comparisons.get_comparison(params["comparison_id"])
+
+    def list_series(self) -> dict[str, Any]:
+        return self.series.list_series()
+
+    def create_series(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        return self.series.create_series(body)
+
+    def get_series(self, *, params: dict[str, str]) -> dict[str, Any]:
+        return self.series.get_series(params["series_id"])
 
     def list_briefs(
         self,
@@ -498,6 +510,29 @@ def build_router(handlers: ApiHandlers) -> Router:
         capability="comparison:read",
         resource_kind="comparison",
         resource_id_param="comparison_id",
+    )
+
+    router.add(
+        "GET",
+        "/api/series",
+        handlers.list_series,
+        capability="series:read",
+        resource_kind="series",
+    )
+    router.add(
+        "PUT",
+        "/api/series",
+        handlers.create_series,
+        capability="series:write",
+        resource_kind="series",
+    )
+    router.add(
+        "GET",
+        "/api/series/{series_id}",
+        handlers.get_series,
+        capability="series:read",
+        resource_kind="series",
+        resource_id_param="series_id",
     )
 
     router.add(

@@ -5,6 +5,7 @@ import type {
   ObservationSummary,
   PlotDetail,
   PlotSummary,
+  SeriesSummary,
   WorkspaceKey,
 } from "../domain/types";
 import { api, errorMessage } from "../services/api";
@@ -25,6 +26,8 @@ interface WorkspaceState {
   selectedObservationId: string | null;
   comparisons: ComparisonSummary[];
   selectedComparisonId: string | null;
+  series: SeriesSummary[];
+  selectedSeriesId: string | null;
   notices: Notice[];
   backendOnline: boolean;
 }
@@ -41,6 +44,8 @@ const state = reactive<WorkspaceState>({
   selectedObservationId: null,
   comparisons: [],
   selectedComparisonId: null,
+  series: [],
+  selectedSeriesId: null,
   notices: [],
   backendOnline: false,
 });
@@ -61,6 +66,10 @@ const selectedComparison = computed(() =>
   null,
 );
 
+const selectedSeries = computed(
+  () => state.series.find((item) => item.id === state.selectedSeriesId) ?? null,
+);
+
 export function useWorkspace() {
   async function initialize(): Promise<void> {
     state.loading = true;
@@ -71,6 +80,7 @@ export function useWorkspace() {
         refreshPlots(),
         refreshObservations(),
         refreshComparisons(),
+        refreshSeries(),
       ]);
     } catch (error) {
       state.backendOnline = false;
@@ -199,6 +209,31 @@ export function useWorkspace() {
     return comparison;
   }
 
+  async function refreshSeries(): Promise<void> {
+    const response = (await api.listSeries()) as {
+      items: SeriesSummary[];
+    };
+    state.series = response.items;
+    if (
+      state.selectedSeriesId &&
+      !state.series.some((item) => item.id === state.selectedSeriesId)
+    ) {
+      state.selectedSeriesId = null;
+    }
+    if (!state.selectedSeriesId && state.series.length > 0) {
+      state.selectedSeriesId = state.series[0].id;
+    }
+  }
+
+  async function createSeries(
+    payload: Record<string, unknown>,
+  ): Promise<SeriesSummary> {
+    const series = (await api.createSeries(payload)) as SeriesSummary;
+    state.selectedSeriesId = series.id;
+    await refreshSeries();
+    return series;
+  }
+
   async function createBrief(
     plotId: string,
     title: string,
@@ -231,6 +266,10 @@ export function useWorkspace() {
 
   function selectComparison(comparisonId: string): void {
     state.selectedComparisonId = comparisonId;
+  }
+
+  function selectSeries(seriesId: string): void {
+    state.selectedSeriesId = seriesId;
   }
 
   function pushNotice(
@@ -274,11 +313,13 @@ export function useWorkspace() {
     selectedPlot,
     selectedObservation,
     selectedComparison,
+    selectedSeries,
     stages: STAGES,
     initialize,
     refreshPlots,
     refreshObservations,
     refreshComparisons,
+    refreshSeries,
     loadPlot,
     createPlot,
     createTree,
@@ -288,11 +329,13 @@ export function useWorkspace() {
     removeStage,
     completeObservation,
     createComparison,
+    createSeries,
     createBrief,
     setActiveWorkspace,
     selectPlot,
     selectObservation,
     selectComparison,
+    selectSeries,
     pushNotice,
     dismissNotice,
     runAction,
